@@ -113,6 +113,8 @@ class FirrtlExpressionSemanticsSpec extends AnyFlatSpec {
     assert(primop(false, "div", 8, List(8, 4), modelUndef = false) == "udiv(i0, zext(i1, 4))")
     assert(primop(true, "div", 8, List(7, 7), modelUndef = false) == "sdiv(sext(i0, 1), sext(i1, 1))")
     assert(primop(true, "div", 8, List(7, 4), modelUndef = false) == "sdiv(sext(i0, 1), sext(i1, 4))")
+    // result width is always the width of the numerator, even if the denominator is larger
+    assert(primop(false, "div", 1, List(1, 2), modelUndef = false) == "udiv(zext(i0, 1), i1)[0]")
   }
 
   it should "correctly translate the `rem` primitive operation" in {
@@ -275,5 +277,36 @@ class FirrtlExpressionSemanticsSpec extends AnyFlatSpec {
     assert(primop(false, "tail", 3, List(4), List(1)) == "i0[2:0]")
     assert(primop(false, "tail", 4, List(5), List(1)) == "i0[3:0]")
     assert(primop(false, "tail", 2, List(5), List(3)) == "i0[1:0]")
+  }
+
+  private def literalSource(resTpe: String, lit: String) =
+    s"""circuit m:
+       |  module m:
+       |    output res: $resTpe
+       |    res <= $lit
+       |
+       |""".stripMargin
+  private def literalExpr(resTpe: String, lit: String) = {
+    val src = literalSource(resTpe, lit)
+    val sys = SMTBackendHelpers.toSys(src, modelUndef = true)
+    sys.signals.last.e.toString
+  }
+
+  private def uIntLit(lit: String) = literalExpr("UInt", lit)
+  it should "correctly translate unsigned integer literals" in {
+    assert(uIntLit("UInt(5)") == "3'b101")
+    assert(uIntLit("UInt<4>(5)") == "4'b101")
+    assert(uIntLit("UInt(0)") == "1'b0")
+  }
+
+  private def sIntLit(lit: String) = literalExpr("SInt", lit)
+  it should "correctly translate signed integer literals" in {
+    assert(sIntLit("SInt(5)") == "4'b101")
+    assert(sIntLit("SInt<4>(5)") == "4'b101")
+    assert(sIntLit("SInt(0)") == "1'b0")
+    assert(sIntLit("SInt(-1)") == "1'b1")
+    assert(sIntLit("SInt(-2)") == "2'b10")
+    assert(sIntLit("SInt(-5)") == "4'b1011")
+    assert(sIntLit("SInt<4>(-5)") == "4'b1011")
   }
 }
