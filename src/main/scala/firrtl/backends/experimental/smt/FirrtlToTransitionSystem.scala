@@ -3,7 +3,7 @@
 
 package firrtl.backends.experimental.smt
 
-import firrtl.annotations.{MemoryInitAnnotation, NoTargetAnnotation, PresetRegAnnotation}
+import firrtl.annotations.{Target, ReferenceTarget, MemoryInitAnnotation, NoTargetAnnotation, PresetRegAnnotation}
 import firrtl._
 import firrtl.backends.experimental.smt.random._
 import firrtl.options.Dependency
@@ -14,8 +14,12 @@ import firrtl.stage.Forms
 import firrtl.stage.TransformManager.TransformDependency
 import firrtl.transforms.{EnsureNamedStatements, PropagatePresetAnnotations}
 import logger.LazyLogging
+import chiseltest.formal._ 
+import firrtl.analyses._
 
 import scala.collection.mutable
+import java.lang.ref.Reference
+
 
 case class TransitionSystemAnnotation(sys: TransitionSystem) extends NoTargetAnnotation
 
@@ -23,6 +27,7 @@ case class TransitionSystemAnnotation(sys: TransitionSystem) extends NoTargetAnn
   * can then be exported as SMTLib or Btor2 file.
   */
 object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
+  //VerilogMemDelays we want to trace the renaming of the registers created my the mem delay pass, I haven't gotten it now, I will see.
   override def prerequisites: Seq[Dependency[Transform]] = Forms.LowForm ++
     Seq(
       Dependency(VerilogMemDelays),
@@ -34,20 +39,29 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
   override def optionalPrerequisites: Seq[TransformDependency] = Seq(Dependency[firrtl.passes.InlineInstances])
 
   override protected def execute(state: CircuitState): CircuitState = {
+    // Maybe Death Code Elimination has elimated some codes which are irrivalent with assertion and output.
     val circuit = state.circuit
+
+    // println(circuit)
+    // println("****************")
     val presetRegs = state.annotations.collect {
       case PresetRegAnnotation(target) if target.module == circuit.main => target.ref
     }.toSet
+    /*println("presetRegs:")
+    println(presetRegs)*/
 
+    // in counter, no memory, no non-random memory
     // collect all non-random memory initialization
     val memInit = state.annotations.collect { case a: MemoryInitAnnotation if !a.isRandomInit => a }
       .filter(_.target.module == circuit.main)
       .map(a => a.target.ref -> a.initValue)
       .toMap
 
+    // map module's name to module's firrtl, I think toMap is to make it explicitly
     // module look up table
     val modules = circuit.modules.map(m => m.name -> m).toMap
-
+    
+    // in counter, no uninterpreted module annotations, maybe find its meaning later
     // collect uninterpreted module annotations
     val uninterpreted = state.annotations.collect {
       case a: UninterpretedModuleAnnotation =>
@@ -55,8 +69,30 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
         a.target.module -> a
     }.toMap
 
+    val SVAAnnos : Seq[SVAAnno] = state.annotations.collect {
+      case s: SVAAnno => s
+    }
+
+    val svaTargets = SVAAnnos.flatMap(_.ttargets.flatten).filter(_.isInstanceOf[AtmPropAnno]).map(_.asInstanceOf[AtmPropAnno].target.asInstanceOf[ReferenceTarget])
+    println(svaTargets)
+
+    val irLookup = IRLookup(circuit)
+    //println(irLookup)
+    val svaExprs = svaTargets.map(irLookup.expr(_))
+    //val ttt = irLookup.expr(svaTarget(0).asInstanceOf[AtmPropAnno].target.asInstanceOf[ReferenceTarget])
+    //println(ttt)
+    //println("Deserialized Target:")
+    //val deserializedTarget : ReferenceTarget = Target.deserialize(svaTarget(0).asInstanceOf[AtmPropAnno].target.serialize).asInstanceOf[ReferenceTarget]
+    //val deserializedExpr = irLookup.expr(deserializedTarget)
+    //println(deserializedExpr)
+    
+    // println(SVAAnnos.toSeq)
+    // ExtModuleException: Generally used for Verilog black boxes
+    // see line 34, inlining has happened
     // convert the main module
     val main = modules(circuit.main)
+    // println(main)
+    // it seems that there are some pretreatments before this
     val sys = main match {
       case _: ir.ExtModule =>
         throw new ExtModuleException(
@@ -65,9 +101,22 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
       case m: ir.Module =>
         new ModuleToTransitionSystem(presetRegs = presetRegs, memInit = memInit, uninterpreted = uninterpreted).run(m)
     }
+    //println("")
 
-    val sortedSys = TopologicalSort.run(sys)
+    //val svaSignals = svaExprs.collect{case i:ir.Expression => Signal("svaBad", FirrtlExpressionSemantics.toSMT(i), IsBad)}
+    val svaPrefix = "svaBad"
+    var inde = 1
+    val svaSingalsMutable :mutable.ArrayBuffer[Signal] = mutable.ArrayBuffer[Signal]()
+    svaExprs.foreach{
+      case i:ir.Expression =>
+        svaSingalsMutable.append(Signal("svaBad"+inde, FirrtlExpressionSemantics.toSMT(i), IsBad))
+        inde = inde + 1
+    }
+    val sysWithSVA = sys.copy(sys.name,sys.inputs,sys.states, sys.signals:::(svaSingalsMutable.toList),sys.comments,sys.header)
+    val sortedSys = TopologicalSort.run(sysWithSVA)
     val anno = TransitionSystemAnnotation(sortedSys)
+    // TransitionSystem(m.name, inputs.toList, states.values.toList, signals.toList, comments.toMap, header)
+    // val anno_ = 
     state.copy(circuit = circuit, annotations = state.annotations :+ anno)
   }
 }
@@ -102,6 +151,11 @@ private class ModuleToTransitionSystem(
     extends LazyLogging {
 
   def run(m: ir.Module): TransitionSystem = {
+     println(m)
+    // println(svaanno)
+    // val irLookup = IRLookup(circuit)
+    // signals.append(Signal("svaBad", e = onExpression(svaExpr(0)), lbl = IsBad))
+
     // first pass over the module to convert expressions; discover state and I/O
     m.foreachPort(onPort)
     m.foreachStmt(onStatement)
@@ -128,6 +182,7 @@ private class ModuleToTransitionSystem(
     TransitionSystem(m.name, inputs.toList, states.values.toList, signals.toList, comments.toMap, header)
   }
 
+  //notice these are mutable, and val refers to their reference is unchangable
   private val inputs = mutable.ArrayBuffer[BVSymbol]()
   private val clocks = mutable.ArrayBuffer[String]()
   private val signals = mutable.ArrayBuffer[Signal]()
@@ -135,9 +190,12 @@ private class ModuleToTransitionSystem(
   private val infos = mutable.ArrayBuffer[(String, ir.Info)]()
 
   private def onPort(p: ir.Port): Unit = {
+    // no details about AsyncResetType
     if (isAsyncReset(p.tpe)) {
       throw new AsyncResetException(s"Found AsyncReset ${p.name}.")
     }
+    // matain infos to generate comments in the future
+    // if this port is an input, then handle it with its type (clock or general clock)
     infos.append(p.name -> p.info)
     p.direction match {
       case ir.Input =>
@@ -165,25 +223,38 @@ private class ModuleToTransitionSystem(
     case ir.DefNode(info, name, expr) =>
       if (!isClock(expr.tpe) && !isAsyncReset(expr.tpe)) {
         infos.append(name -> info)
+        // println(name)
+        // many intermediate nodes are generated in firrt transform ?
         signals.append(Signal(name, onExpression(expr), IsNode))
       }
     case r: ir.DefRegister =>
+      // println(r)
       infos.append(r.name -> r.info)
+      // why not states(r.names) = states(r.names).copy(init = ...) ?
       states(r.name) = onRegister(r)
     case m: ir.DefMemory =>
+      // println(m)
       infos.append(m.name -> m.info)
       states(m.name) = onMemory(m)
     case ir.Connect(info, loc, expr) =>
+      // get it !
+       /*println(loc)
+       println(expr)
+       println("------")*/
       if (!isGroundType(loc.tpe)) error("All connects should have been lowered to ground type!")
       if (!isClock(loc.tpe) && !isAsyncReset(expr.tpe)) { // we ignore clock connections
         val name = loc.serialize
         val e = onExpression(expr, bitWidth(loc.tpe).toInt, allowNarrow = false)
         Utils.kind(loc) match {
           case RegKind => states(name) = states(name).copy(next = Some(e))
+          // I don't understand... Because submodules have been flattened, we don't need to consider submodule ?
+          // But why IsOutput ?
           case PortKind | InstanceKind => // module output or submodule input
+            // println(loc)
             infos.append(name -> info)
             signals.append(Signal(name, e, IsOutput))
           case MemKind | WireKind =>
+            // Consider memory later
             // InlineInstances can insert wires without re-running RemoveWires for now we just deal with it.
             infos.append(name -> info)
             signals.append(Signal(name, e, IsNode))
@@ -191,7 +262,10 @@ private class ModuleToTransitionSystem(
       }
     case i: ir.IsInvalid =>
       throw new UnsupportedFeatureException(s"IsInvalid statements are not supported: ${i.serialize}")
-    case ir.DefInstance(info, name, module, tpe) => onInstance(info, name, module, tpe)
+    // To See
+    case ir.DefInstance(info, name, module, tpe) => 
+      println (s)
+      onInstance(info, name, module, tpe)
     case s: ir.Verification =>
       if (s.op == ir.Formal.Cover) {
         logger.info(s"[info] Cover statement was ignored: ${s.serialize}")
@@ -227,7 +301,9 @@ private class ModuleToTransitionSystem(
       }
     case s: ir.Print =>
       logger.info(s"Info: ignoring: ${s.serialize}")
-    case other => other.foreachStmt(onStatement)
+    case other => 
+      // recursive processing  
+      other.foreachStmt(onStatement)
   }
 
   private def onRegister(r: ir.DefRegister): State = {
@@ -237,6 +313,7 @@ private class ModuleToTransitionSystem(
     val initExpr = onExpression(r.init, width)
     val sym = BVSymbol(r.name, width)
     val hasReset = initExpr != sym
+    // _resetCount is preset, I think _resetCount has initial expression, others' initialization depends on it, and use next to express
     val isPreset = presetRegs.contains(r.name)
     assert(!isPreset || hasReset, s"Expected preset register ${r.name} to have a reset value, not just $initExpr!")
     val state = State(sym, if (isPreset) Some(initExpr) else None, None)

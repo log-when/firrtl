@@ -13,6 +13,11 @@ lazy val isAtLeastScala213 = Def.setting {
   CrossVersion.partialVersion(scalaVersion.value).exists(_ >= (2, 13))
 }
 
+val defaultVersions = Map(
+  "chiseltest" -> "edu.berkeley.cs" %% "chiseltest" % "0.6-SNAPSHOT"
+)
+lazy val chiseltestRef = ProjectRef(file("../chiseltest") , "chiseltest")
+
 lazy val firrtlSettings = Seq(
   name := "firrtl",
   version := "1.6-SNAPSHOT",
@@ -160,6 +165,7 @@ lazy val docSettings = Seq(
 )
 
 lazy val firrtl = (project in file("."))
+  .sourceDependency(chiseltestRef, defaultVersions("chiseltest"))
   .enablePlugins(ProtobufPlugin)
   .enablePlugins(ScalaUnidocPlugin)
   .enablePlugins(Antlr4Plugin)

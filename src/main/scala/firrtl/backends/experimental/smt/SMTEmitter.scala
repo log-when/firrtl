@@ -10,6 +10,7 @@ import firrtl.annotations.{Annotation, NoTargetAnnotation}
 import firrtl.options.Viewer.view
 import firrtl.options.{CustomFileEmission, Dependency}
 import firrtl.stage.FirrtlOptions
+import chiseltest.formal._ 
 
 private[firrtl] abstract class SMTEmitter private[firrtl] ()
     extends Transform
@@ -23,6 +24,9 @@ private[firrtl] abstract class SMTEmitter private[firrtl] ()
   protected def serialize(sys: TransitionSystem): Annotation
 
   override protected def execute(state: CircuitState): CircuitState = {
+    /*val SVAAnnos : AnnotationSeq = state.annotations.filter {_.isInstanceOf[SVAAnno]}
+    println("3: ")
+    println(SVAAnnos.toSeq)*/
     val emitCircuit = state.annotations.exists {
       case EmitCircuitAnnotation(a) if this.getClass == a    => true
       case EmitAllModulesAnnotation(a) if this.getClass == a => error("EmitAllModulesAnnotation not supported!")

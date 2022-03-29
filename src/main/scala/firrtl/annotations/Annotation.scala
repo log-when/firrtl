@@ -78,6 +78,8 @@ trait SingleTargetAnnotation[T <: Named] extends Annotation {
   // This mess of @unchecked and try-catch is working around the fact that T is unknown due to type
   // erasure. We cannot that newTarget is of type T, but a CastClassException will be thrown upon
   // invoking duplicate if newTarget cannot be cast to T (only possible in the concrete subclass)
+  
+  //it seems that when updating, a singleTargetAnnotation may become a list of singleTargetAnnotation to maintain its "singleness"
   def update(renames: RenameMap): Seq[Annotation] = {
     target match {
       case c: Target =>

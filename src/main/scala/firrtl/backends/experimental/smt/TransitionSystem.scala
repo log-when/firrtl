@@ -75,18 +75,22 @@ object TransitionSystem {
 }
 
 private object TopologicalSort {
-
+  
+  // Maybe because btor2 file requires preceding signals can't depend on following signals 
   /** Ensures that all signals in the resulting system are topologically sorted.
     * This is necessary because [[firrtl.transforms.RemoveWires]] does
     * not sort assignments to outputs, submodule inputs nor memory ports.
     */
   def run(sys: TransitionSystem): TransitionSystem = {
+    // Get all inputs and states' name.
     val inputsAndStates = sys.inputs.map(_.name) ++ sys.states.map(_.sym.name)
     val signalOrder = sort(sys.signals.map(s => s.name -> s.e), inputsAndStates)
+    // This todo is interesting.
     // TODO: maybe sort init expressions of states (this should not be needed most of the time)
     signalOrder match {
       case None => sys
       case Some(order) =>
+        //Maintain the map singals' names to singals 
         val signalMap = sys.signals.map(s => s.name -> s).toMap
         // we flatMap over `get` in order to ignore inputs/states in the order
         sys.copy(signals = order.flatMap(signalMap.get).toList)
@@ -94,6 +98,9 @@ private object TopologicalSort {
   }
 
   private def sort(signals: Iterable[(String, SMTExpr)], globalSignals: Iterable[String]): Option[Iterable[String]] = {
+    // I get its meaning ! First we can get all input and states, but not intermediate nodes.
+    // Then we traverse every singal, if we find it relies on some unknown singal, we need to find a new topological order.
+    // println(signals)
     val known = new mutable.HashSet[String]() ++ globalSignals
     var needsReordering = false
     val digraph = new MutableDiGraph[String]
@@ -102,12 +109,15 @@ private object TopologicalSort {
         digraph.addVertex(name)
         val uniqueDependencies = mutable.LinkedHashSet[String]() ++ findDependencies(expr)
         uniqueDependencies.foreach { d =>
-          if (!known.contains(d)) { needsReordering = true }
+          if (!known.contains(d)) { 
+          needsReordering = true 
+        }
           digraph.addPairWithEdge(name, d)
         }
         known.add(name)
     }
     if (needsReordering) {
+      // Dependency graph is reverse.
       Some(digraph.linearize.reverse)
     } else { None }
   }

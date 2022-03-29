@@ -548,6 +548,7 @@ object ConnectionGraph {
         case p: Print => addLabeledVertex(asTarget(m, tagger)(p), p)
         case s: Stop  => addLabeledVertex(asTarget(m, tagger)(s), s)
         case EmptyStmt =>
+        case _ => 
       }
       stmt
     }
