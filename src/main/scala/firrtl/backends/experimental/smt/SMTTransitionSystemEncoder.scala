@@ -112,6 +112,7 @@ object SMTTransitionSystemEncoder {
     case IsBad        => "assert"
     case IsConstraint => "assume"
     case IsFair       => "fair"
+    case IsJustice    => "justice"
   }
   private def toDescription(sym: SMTSymbol, kind: String, comments: String => Option[String]): List[Comment] = {
     List(sym match {

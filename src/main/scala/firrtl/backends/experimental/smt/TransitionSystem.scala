@@ -29,12 +29,14 @@ case object IsOutput extends SignalLabel
 case object IsConstraint extends SignalLabel
 case object IsBad extends SignalLabel
 case object IsFair extends SignalLabel
+case object IsJustice extends SignalLabel
 case object IsNext extends SignalLabel
 case object IsInit extends SignalLabel
 
+
 object SignalLabel {
-  private val labels = Seq(IsNode, IsOutput, IsConstraint, IsBad, IsFair, IsNext, IsInit)
-  val labelStrings = Seq("node", "output", "constraint", "bad", "fair", "next", "init")
+  private val labels = Seq(IsNode, IsOutput, IsConstraint, IsBad, IsFair, IsJustice, IsNext, IsInit)
+  val labelStrings = Seq("node", "output", "constraint", "bad", "fair", "justice", "next", "init")
   val labelToString: SignalLabel => String = labels.zip(labelStrings).toMap
   val stringToLabel: String => SignalLabel = labelStrings.zip(labels).toMap
 }

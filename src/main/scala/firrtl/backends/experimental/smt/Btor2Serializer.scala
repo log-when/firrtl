@@ -192,7 +192,8 @@ private class Btor2Serializer private () {
         case Some(IsConstraint) => line(s"constraint $id ; $name")
         case Some(IsBad)        => line(s"bad $id ; $name")
         case Some(IsFair)       => line(s"fair $id ; $name")
-        case _                  =>
+        case Some(IsJustice)    => line(s"justice $id ; $name")
+        case _ =>
       }
       // add trailing comment
       sys.comments.get(name).foreach(trailingComment)
