@@ -80,6 +80,7 @@ object Buchi2TransitionSystem {
         {
             auxVar(atom-apNum)
         }
+        println(s"curExpr: $curExpr")
         BVIte(curExpr,high,low)
     }
     }
@@ -155,8 +156,10 @@ object Buchi2TransitionSystem {
     val baState_ = State(baState, Some(baStateInit), Some(baStateNext))
 
     val BAAccept = h.accStates
-    val acceptExpr = genAcc(baState, BAAccept, h.stateBits)
-    val accSignal = Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)
+    val acceptExpr = BVNot(genAcc(baState, BAAccept, h.stateBits))
+    
+    //Notice: for testing
+    val accSignal = Signal("BAacc" + accSignalNum, acceptExpr, IsBad)
     println("extraInput")
     println(extraInput.toSeq)
     Tuple3(extraInput, baState_, accSignal)
