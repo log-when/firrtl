@@ -223,7 +223,12 @@ private class ModuleToTransitionSystem(
         if (isClock(p.tpe)) {
           clocks.append(p.name)
         } else {
-          inputs.append(BVSymbol(p.name, bitWidth(p.tpe).toInt))
+          println(s"port: ${p}")
+          val temp1:SMTExpr = new BVLiteral(BigInt(1),1)
+          val temp2:SMTExpr = new BVLiteral(BigInt(0),1)
+          states(p.name) = State(BVSymbol(p.name,1),Some(temp1),Some(temp2))
+
+          //inputs.append(BVSymbol(p.name, bitWidth(p.tpe).toInt))
         }
       case ir.Output =>
     }
@@ -473,6 +478,7 @@ private class ModuleToTransitionSystem(
   private def error(msg:        String):  Unit = throw new RuntimeException(msg)
   private def isGroundType(tpe: ir.Type): Boolean = tpe.isInstanceOf[ir.GroundType]
   private def isClock(tpe:      ir.Type): Boolean = tpe == ir.ClockType
+  private def isReset(tpe:      ir.Type): Boolean = tpe == ir.ResetType
   private def isAsyncReset(tpe: ir.Type): Boolean = tpe == ir.AsyncResetType
   
    

@@ -156,7 +156,7 @@ object Buchi2TransitionSystem {
     val baState_ = State(baState, Some(baStateInit), Some(baStateNext))
 
     val BAAccept = h.accStates
-    val acceptExpr = BVNot(genAcc(baState, BAAccept, h.stateBits))
+    val acceptExpr = genAcc(baState, BAAccept, h.stateBits)
     
     //Notice: for testing
     val accSignal = Signal("BAacc" + accSignalNum, acceptExpr, IsBad)
