@@ -129,9 +129,9 @@ object Buchi2TransitionSystem {
         h
     }
 
-  def psl2TransitionSystem(h:hoaParser, p2target:Map[String,Target], extraInputNum:Int, BAStateNum:Int, accSignalNum:Int, circuit:Circuit):Tuple3[Seq[BVSymbol], State, Signal] = 
+  def psl2TransitionSystem(h:hoaParser, p2target:Map[String,Target], extraInputNum:Int, BAStateNum:Int, accSignalNum:Int, circuit:Circuit, resetTarget:Target):Tuple3[Seq[BVSymbol], State, Signal] = 
   {
-    val baState = BVSymbol("baState" + BAStateNum, h.stateBits)
+    val baState = BVSymbol("baState" + BAStateNum + "_", h.stateBits)
     val extraInput:Seq[BVSymbol] = (extraInputNum until (extraInputNum + h.auxVarNum)).toSeq.map{case i: Int => BVSymbol("extInput"+i,1)}
     // extraInputNum = extraInputNum + h.auxVarNum
     val trans_ = h.transitionFunc
@@ -152,8 +152,12 @@ object Buchi2TransitionSystem {
       totalTransSeq += (i -> TransSeq)
     }
     val baStateInit:BVExpr = BVLiteral(h.initState,h.stateBits)
-    val baStateNext = genTotalIte(baState, totalTransSeq, BVLiteral(h.stateNum,h.stateBits), h.stateBits)
-    val baState_ = State(baState, Some(baStateInit), Some(baStateNext))
+    
+    val irLookup = IRLookup(circuit)
+    val resetExpr = FirrtlExpressionSemantics.toSMT(irLookup.expr(resetTarget.asInstanceOf[ReferenceTarget]))
+
+    val baStateNext = BVIte(resetExpr, baStateInit, genTotalIte(baState, totalTransSeq, BVLiteral(h.stateNum,h.stateBits), h.stateBits))
+    val baState_ = State(baState, None, Some(baStateNext))
 
     val BAAccept = h.accStates
     val acceptExpr = genAcc(baState, BAAccept, h.stateBits)

@@ -20,6 +20,7 @@ import scala.collection.mutable
 import chiseltest.formal._
 import sys.process._ 
 import jhoafparser.parser.HOAFParser
+import firrtl.analyses._
 
 case class TransitionSystemAnnotation(sys: TransitionSystem) extends NoTargetAnnotation
 
@@ -86,57 +87,111 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
     }
     //println("")
 
-    val targetDirs = state.annotations.collect { case TargetDirAnnotation(d) => d }.toSet
-    require(targetDirs.nonEmpty, "Expected exactly one target directory, got none!")
-    require(targetDirs.size == 1, s"Expected exactly one target directory, got multiple: $targetDirs")
-
-    val svaAnnos : AnnotationSeq = state.annotations.filter {_.isInstanceOf[SVAAnno]}
-    val pslsWithMap : Seq[Tuple2[String, Map[String,Target]]] = svaAnnos.collect{
-      case s: SVAAnno => SVAAnno.SVAAnno2PSL(s)
-    }
-    
-    var extraInputNum: Int = 0
-    var extraInputs:mutable.Seq[BVSymbol] = mutable.Seq[BVSymbol]()
-    var baStateNum:Int = 0
-    var baStates:mutable.Seq[State] = mutable.Seq[State]()
-    var accSignalNum:Int = 0
-    var accSignals:mutable.Seq[Signal] = mutable.Seq[Signal]()
-
-     
-    val toTransitionSystems: Unit = pslsWithMap.collect{
-      case t: Tuple2[String, Map[String,Target]] => 
-      {
-        val cmd = Seq("ltl2tgba","-B","-D", "-f", t._1)
-        val retr:os.CommandResult = os.proc(cmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
-        val dba = Buchi2TransitionSystem.getDBA(retr)
-        val ret = Buchi2TransitionSystem.psl2TransitionSystem(dba, t._2, extraInputNum, baStateNum, accSignalNum, circuit)
-        extraInputs ++= ret._1
-        baStates :+= ret._2
-        accSignals :+= ret._3
-        extraInputNum += dba.auxVarNum
-        baStateNum += 1
-        accSignalNum += 1
+    val svaAnnos : AnnotationSeq = state.annotations.filter {_.isInstanceOf[svaSeqAnno]}
+    //println(s"svaAnnos: ($svaAnnos).toSeq")
+    val sortedSys =
+    if(!svaAnnos.isEmpty)
+    {
+      val targetDirs = state.annotations.collect { case TargetDirAnnotation(d) => d }.toSet
+      require(targetDirs.nonEmpty, "Expected exactly one target directory, got none!")
+      require(targetDirs.size == 1, s"Expected exactly one target directory, got multiple: $targetDirs")
+      val pslsWithMap : Seq[Tuple3[String, Map[String,Target], Target]] = svaAnnos.collect{
+      case s: svaSeqAnno => svaSeqAnno.SVAAnno2PSL(s)
       }
-    }
-    //val svaSignals = svaExprs.collect{case i:ir.Expression => Signal("svaBad", FirrtlExpressionSemantics.toSMT(i), IsBad)}
-    //val psl = "{(p | q)[*]}<>->Gp"
-    //println(psl)
+      
+      var extraInputNum: Int = 0
+      var extraInputs:mutable.Seq[BVSymbol] = mutable.Seq[BVSymbol]()
+      var baStateNum:Int = 0
+      var baStates:mutable.Seq[State] = mutable.Seq[State]()
+      var accSignalNum:Int = 0
+      var accSignals:mutable.Seq[Signal] = mutable.Seq[Signal]()
+      val irLookup = IRLookup(circuit)
+      val resetSignals:Seq[BVExpr] = pslsWithMap.collect{
+        case t: Tuple3[String, Map[String,Target],Target] => 
+        {
+          val thisExpr = irLookup.expr(t._3.asInstanceOf[ReferenceTarget])
+          FirrtlExpressionSemantics.toSMT(thisExpr)
+        }
+      }
 
-    /*val svaPrefix = "svaBad"
-    var inde = 1
-    val svaSingalsMutable :mutable.ArrayBuffer[Signal] = mutable.ArrayBuffer[Signal]()
-    svaExprs.foreach{
-      case i:ir.Expression =>
-        svaSingalsMutable.append(Signal("svaBad"+inde, FirrtlExpressionSemantics.toSMT(i), IsBad))
-        inde = inde + 1
+      val toTransitionSystems: Unit = pslsWithMap.collect{
+        case t: Tuple3[String, Map[String,Target],Target] => 
+        {
+          val cmd = Seq("ltl2tgba","-B","-D", "-f", t._1)
+          val retr:os.CommandResult = os.proc(cmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
+          val dba = Buchi2TransitionSystem.getDBA(retr)
+          val ret = Buchi2TransitionSystem.psl2TransitionSystem(dba, t._2, extraInputNum, baStateNum, accSignalNum, circuit, t._3)
+          extraInputs ++= ret._1
+          baStates :+= ret._2
+          accSignals :+= ret._3
+          extraInputNum += dba.auxVarNum
+          baStateNum += 1
+          accSignalNum += 1
+        }
+      }
+      //val svaSignals = svaExprs.collect{case i:ir.Expression => Signal("svaBad", FirrtlExpressionSemantics.toSMT(i), IsBad)}
+      //val psl = "{(p | q)[*]}<>->Gp"
+      //println(psl)
+
+      /*val svaPrefix = "svaBad"
+      var inde = 1
+      val svaSingalsMutable :mutable.ArrayBuffer[Signal] = mutable.ArrayBuffer[Signal]()
+      svaExprs.foreach{
+        case i:ir.Expression =>
+          svaSingalsMutable.append(Signal("svaBad"+inde, FirrtlExpressionSemantics.toSMT(i), IsBad))
+          inde = inde + 1
+      }
+      val sysWithSVA = sys.copy(sys.name,sys.inputs,sys.states, sys.signals:::(svaSingalsMutable.toList),sys.comments,sys.header)
+      val sortedSys = TopologicalSort.run(sysWithSVA)
+      val anno = TransitionSystemAnnotation(sortedSys)*/
+      // TransitionSystem(m.name, inputs.toList, states.values.toList, signals.toList, comments.toMap, header)
+      // val anno_ = 
+      val sysWithSVA = sys.copy(sys.name,sys.inputs:::extraInputs.toList,sys.states:::baStates.toList, sys.signals,sys.comments,sys.header)
+      val just2BadStatesMap = sysWithSVA.states.filter
+      {
+        case s:State =>
+          s.name != "_resetCount"
+      }
+      .map{
+        case s:State => 
+          {
+            //println(s)
+            val temp:BVSymbol = s.sym.asInstanceOf[BVSymbol]
+            val temp2 = temp.copy(temp.name+"__",temp.width)
+            Tuple2(s,s.copy(temp2,None,Some(temp2.asInstanceOf[SMTExpr])))
+          }
+      }
+      var auxJust2BadStates = mutable.Seq[State]() ++ just2BadStatesMap.map{_._2}.toSeq
+      var auxJ2BSignals:mutable.Seq[Signal] = mutable.Seq[Signal]()
+      val correspEquals = just2BadStatesMap.map{
+        case t:Tuple2[State,State] =>
+          BVEqual(t._1.sym.asInstanceOf[BVExpr],t._2.sym.asInstanceOf[BVExpr])
+      }
+      var correspEqual = BVAnd(correspEquals)
+      for(i <- 0 until accSignals.size)
+      {
+        val reset = resetSignals(i)
+
+        val seenSymbol = BVSymbol("seen"+"_"+i+"_",1)
+        val seen:State = State(seenSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVAnd(List(BVOr(List(correspEqual,seenSymbol)),BVNot(reset)))))
+        auxJust2BadStates +:= seen
+
+        val triggeredSymbol = BVSymbol("triggered"+"_"+i+"_",1)
+        val triggered:State = State(triggeredSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVAnd(List(BVOr(List(triggeredSymbol,accSignals(i).e.asInstanceOf[BVExpr])),seenSymbol,BVNot(reset)))))
+        auxJust2BadStates +:= triggered
+
+        
+        val loop = Signal("just2Bad" + i + "_", BVAnd(List(triggeredSymbol,correspEqual):+BVNot(reset)) , IsBad)
+        auxJ2BSignals +:= loop
+      }
+      val sysJust2Bad = sysWithSVA.copy(sysWithSVA.name,sysWithSVA.inputs,sysWithSVA.states:::auxJust2BadStates.toList,sysWithSVA.signals:::auxJ2BSignals.toList,sysWithSVA.comments,sysWithSVA.header)
+      TopologicalSort.run(sysJust2Bad)
     }
-    val sysWithSVA = sys.copy(sys.name,sys.inputs,sys.states, sys.signals:::(svaSingalsMutable.toList),sys.comments,sys.header)
-    val sortedSys = TopologicalSort.run(sysWithSVA)
-    val anno = TransitionSystemAnnotation(sortedSys)*/
-    // TransitionSystem(m.name, inputs.toList, states.values.toList, signals.toList, comments.toMap, header)
-    // val anno_ = 
-    val sysWithSVA = sys.copy(sys.name,sys.inputs:::extraInputs.toList,sys.states:::baStates.toList, sys.signals:::accSignals.toList,sys.comments,sys.header)
-    val sortedSys = TopologicalSort.run(sysWithSVA)
+    else
+    {
+       TopologicalSort.run(sys)
+    }
+
     val anno = TransitionSystemAnnotation(sortedSys)
     state.copy(circuit = circuit, annotations = state.annotations :+ anno)
   }
@@ -224,11 +279,11 @@ private class ModuleToTransitionSystem(
           clocks.append(p.name)
         } else {
           println(s"port: ${p}")
-          val temp1:SMTExpr = new BVLiteral(BigInt(1),1)
-          val temp2:SMTExpr = new BVLiteral(BigInt(0),1)
-          states(p.name) = State(BVSymbol(p.name,1),Some(temp1),Some(temp2))
+          // val temp1:SMTExpr = new BVLiteral(BigInt(1),1)
+          // val temp2:SMTExpr = new BVLiteral(BigInt(0),1)
+          // states(p.name) = State(BVSymbol(p.name,1),Some(temp1),Some(temp2))
 
-          //inputs.append(BVSymbol(p.name, bitWidth(p.tpe).toInt))
+          inputs.append(BVSymbol(p.name, bitWidth(p.tpe).toInt))
         }
       case ir.Output =>
     }

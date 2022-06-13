@@ -14,7 +14,7 @@ lazy val isAtLeastScala213 = Def.setting {
 }
 
 val defaultVersions = Map(
-  "chiseltest" -> "edu.berkeley.cs" %% "chiseltest" % "0.6-SNAPSHOT"
+  "chiseltest" -> "edu.berkeley.cs" %% "chiseltest" % "0.7-SNAPSHOT"
 )
 lazy val chiseltestRef = ProjectRef(file("../chiseltest") , "chiseltest")
 
