@@ -156,16 +156,33 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
         case s:State => 
           {
             //println(s)
-            val temp:BVSymbol = s.sym.asInstanceOf[BVSymbol]
-            val temp2 = temp.copy(temp.name+"__",temp.width)
-            Tuple2(s,s.copy(temp2,None,Some(temp2.asInstanceOf[SMTExpr])))
+            if(s.sym.isInstanceOf[BVSymbol])
+            {
+              val temp:BVSymbol = s.sym.asInstanceOf[BVSymbol]
+              val temp2 = temp.copy(temp.name+"__",temp.width)
+              Tuple2(s,s.copy(temp2,None,Some(temp2.asInstanceOf[SMTExpr])))
+            }
+            else
+            {
+              val temp:ArraySymbol = s.sym.asInstanceOf[ArraySymbol]
+              val temp2 = temp.copy(temp.name+"__",temp.indexWidth,temp.dataWidth)
+              Tuple2(s,s.copy(temp2,None,Some(temp2.asInstanceOf[SMTExpr])))
+            }
           }
       }
       var auxJust2BadStates = mutable.Seq[State]() ++ just2BadStatesMap.map{_._2}.toSeq
       var auxJ2BSignals:mutable.Seq[Signal] = mutable.Seq[Signal]()
       val correspEquals = just2BadStatesMap.map{
         case t:Tuple2[State,State] =>
-          BVEqual(t._1.sym.asInstanceOf[BVExpr],t._2.sym.asInstanceOf[BVExpr])
+          if(t._1.sym.isInstanceOf[BVSymbol])
+          {
+            BVEqual(t._1.sym.asInstanceOf[BVExpr],t._2.sym.asInstanceOf[BVExpr])
+          }
+          else
+          {
+            ArrayEqual(t._1.sym.asInstanceOf[ArrayExpr],t._2.sym.asInstanceOf[ArrayExpr])
+          }
+          
       }
       var correspEqual = BVAnd(correspEquals)
       for(i <- 0 until accSignals.size)
