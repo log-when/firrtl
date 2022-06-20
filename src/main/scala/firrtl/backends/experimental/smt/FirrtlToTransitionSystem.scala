@@ -194,7 +194,7 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
         auxJust2BadStates +:= seen
 
         val triggeredSymbol = BVSymbol("triggered"+"_"+i+"_",1)
-        val triggered:State = State(triggeredSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVAnd(List(BVOr(List(triggeredSymbol,accSignals(i).e.asInstanceOf[BVExpr])),seenSymbol,BVNot(reset)))))
+        val triggered:State = State(triggeredSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVAnd(List(BVOr(List(triggeredSymbol,BVAnd(List(accSignals(i).e.asInstanceOf[BVExpr],seenSymbol)))),BVNot(reset)))))
         auxJust2BadStates +:= triggered
 
         
