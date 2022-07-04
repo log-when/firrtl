@@ -38,7 +38,7 @@ object Buchi2TransitionSystem {
 
     def genTotalIte(baState:BVSymbol, bvs:Map[Int,Seq[Tuple2[BVExpr,BVExpr]]], defau: BVExpr, stateBits:Int): BVExpr =
     {
-    println(s"remaining: ${bvs.size}")
+  //  println(s"remaining: ${bvs.size}")
     if(bvs.isEmpty)
     {
         defau
@@ -47,8 +47,8 @@ object Buchi2TransitionSystem {
     {
         val ffirst = bvs.head
         val remaining = bvs - (ffirst._1)
-        println(ffirst._2)
-        println(genIte(ffirst._2, defau))
+      //  println(ffirst._2)
+      //  println(genIte(ffirst._2, defau))
         BVIte(BVEqual(baState, BVLiteral(BigInt(ffirst._1), stateBits)), genIte(ffirst._2, defau), genTotalIte(baState, remaining, defau, stateBits))
     }
     }
@@ -80,7 +80,7 @@ object Buchi2TransitionSystem {
         {
             auxVar(atom-apNum)
         }
-        println(s"curExpr: $curExpr")
+      //  println(s"curExpr: $curExpr")
         BVIte(curExpr,high,low)
     }
     }
@@ -100,9 +100,9 @@ object Buchi2TransitionSystem {
 
     def getDBA(retr:os.CommandResult): hoaParser = 
     {
-        println("---")           
-        println(retr.out.string)
-        println("---")
+      //  println("---")           
+      //  println(retr.out.string)
+      //  println("---")
 
         val is = new ByteArrayInputStream(retr.out.string.getBytes())
         // 转 BufferedInputStream
@@ -114,18 +114,18 @@ object Buchi2TransitionSystem {
         bis.close()
         is.close()
         
-        println("//////////////////////////")
-        println(h.transitionFunc)
+      //  println("//////////////////////////")
+      //  println(h.transitionFunc)
         h.partialDeterministic()
-        println("//////////////////////////")
-        println(h.transitionFunc)
+      //  println("//////////////////////////")
+      //  println(h.transitionFunc)
         h.addAuxVar()
-        println("//////////////////////////")
-        println(h.transitionFunc)
+      //  println("//////////////////////////")
+      //  println(h.transitionFunc)
 
         //BVSymbol(p.name, bitWidth(p.tpe).toInt)
-        println(s"auxVarNum: ${h.auxVarNum}")
-        println(s"apNum: ${h.apNum}")
+      //  println(s"auxVarNum: ${h.auxVarNum}")
+      //  println(s"apNum: ${h.apNum}")
         h
     }
 
@@ -142,7 +142,7 @@ object Buchi2TransitionSystem {
       var TransSeq: mutable.Seq[Tuple2[BVExpr,BVExpr]] = mutable.Seq[Tuple2[BVExpr,BVExpr]]()
       for((k,v) <- trans_(i))
       {
-        println(s"k:  $k")
+      //  println(s"k:  $k")
         val cond = bddToSMTExpr(h.apNum, k, h.int2Ap, p2target, circuit, extraInput)
         //val cond:BVExpr = BVAnd( BVEqual(baState, BVLiteral(BigInt(i),h.stateBits)), bddToSMTExpr(h.apNum, k, h.int2Ap, p2target, circuit, extraInput) ) 
         val defa:BVExpr = BVLiteral(BigInt(v.head),h.stateBits)
@@ -164,8 +164,8 @@ object Buchi2TransitionSystem {
     
     //Notice: for testing
     val accSignal = Signal("BAacc" + accSignalNum, acceptExpr, IsBad)
-    println("extraInput")
-    println(extraInput.toSeq)
+  //  println("extraInput")
+  //  println(extraInput.toSeq)
     Tuple3(extraInput, baState_, accSignal)
   }
 }

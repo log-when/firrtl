@@ -295,7 +295,7 @@ private class ModuleToTransitionSystem(
         if (isClock(p.tpe)) {
           clocks.append(p.name)
         } else {
-          println(s"port: ${p}")
+          // println(s"port: ${p}")
           // val temp1:SMTExpr = new BVLiteral(BigInt(1),1)
           // val temp2:SMTExpr = new BVLiteral(BigInt(0),1)
           // states(p.name) = State(BVSymbol(p.name,1),Some(temp1),Some(temp2))
@@ -362,7 +362,7 @@ private class ModuleToTransitionSystem(
       throw new UnsupportedFeatureException(s"IsInvalid statements are not supported: ${i.serialize}")
     // To See
     case ir.DefInstance(info, name, module, tpe) => 
-      println (s)
+      // println (s)
       onInstance(info, name, module, tpe)
     case s: ir.Verification =>
       if (s.op == ir.Formal.Cover) {
