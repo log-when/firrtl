@@ -120,12 +120,6 @@ object Buchi2TransitionSystem {
       //  println("//////////////////////////")
       //  println(h.transitionFunc)
         h.addAuxVar()
-      //  println("//////////////////////////")
-      //  println(h.transitionFunc)
-
-        //BVSymbol(p.name, bitWidth(p.tpe).toInt)
-      //  println(s"auxVarNum: ${h.auxVarNum}")
-      //  println(s"apNum: ${h.apNum}")
         h
     }
 
