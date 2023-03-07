@@ -63,7 +63,7 @@ object SerializerSpec {
   val childModuleTabbed: String = tab(childModule)
 
   val simpleCircuit: String =
-    "circuit test :\n" + childModuleTabbed + "\n\n" + testModuleTabbed + "\n"
+    s"FIRRTL version ${Serializer.version.serialize}\ncircuit test :\n" + childModuleTabbed + "\n\n" + testModuleTabbed + "\n"
 }
 
 class SerializerSpec extends AnyFlatSpec with Matchers {
@@ -116,4 +116,24 @@ class SerializerSpec extends AnyFlatSpec with Matchers {
     serialized should be(childModuleTabbed)
   }
 
+  it should "emit whens with empty Blocks correctly" in {
+    val when = Conditionally(NoInfo, Reference("cond"), Block(Seq()), EmptyStmt)
+    val serialized = Serializer.serialize(when, 1)
+    serialized should be("  when cond :\n    skip\n")
+  }
+
+  it should "serialize read-under-write behavior for smems correctly" in {
+    def parseSerializeParse(src: String): Circuit = Parser.parse(Parser.parse(src).serialize)
+    val undefined = parseSerializeParse(SMemTestCircuit.src(""))
+    assert(SMemTestCircuit.findRuw(undefined) == ReadUnderWrite.Undefined)
+
+    val undefined2 = parseSerializeParse(SMemTestCircuit.src(" undefined"))
+    assert(SMemTestCircuit.findRuw(undefined2) == ReadUnderWrite.Undefined)
+
+    val old = parseSerializeParse(SMemTestCircuit.src(" old"))
+    assert(SMemTestCircuit.findRuw(old) == ReadUnderWrite.Old)
+
+    val readNew = parseSerializeParse(SMemTestCircuit.src(" new"))
+    assert(SMemTestCircuit.findRuw(readNew) == ReadUnderWrite.New)
+  }
 }

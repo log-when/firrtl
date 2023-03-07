@@ -9,8 +9,9 @@ import $ivy.`com.lihaoyi::mill-contrib-buildinfo:$MILL_VERSION`
 import mill.contrib.buildinfo.BuildInfo
 
 import java.io.IOException
+import scala.util.matching.Regex
 
-object firrtl extends mill.Cross[firrtlCrossModule]("2.12.15", "2.13.7")
+object firrtl extends mill.Cross[firrtlCrossModule]("2.12.17", "2.13.10")
 
 class firrtlCrossModule(val crossScalaVersion: String)
     extends CrossSbtModule
@@ -47,8 +48,8 @@ class firrtlCrossModule(val crossScalaVersion: String)
       ivy"${scalaOrganization()}:scala-reflect:${scalaVersion()}",
       ivy"com.github.scopt::scopt:3.7.1",
       ivy"net.jcazevedo::moultingyaml:0.4.2",
-      ivy"org.json4s::json4s-native:4.0.5",
-      ivy"org.apache.commons:commons-text:1.9",
+      ivy"org.json4s::json4s-native:4.0.6",
+      ivy"org.apache.commons:commons-text:1.10.0",
       ivy"io.github.alexarchambault::data-class:0.2.5",
       ivy"org.antlr:antlr4-runtime:$antlr4Version",
       ivy"com.google.protobuf:protobuf-java:$protocVersion",
@@ -67,7 +68,7 @@ class firrtlCrossModule(val crossScalaVersion: String)
   object test extends Tests {
     override def ivyDeps = T {
       Agg(
-        ivy"org.scalatest::scalatest:3.2.12",
+        ivy"org.scalatest::scalatest:3.2.14",
         ivy"org.scalatestplus::scalacheck-1-15:3.2.11.0"
       )
     }
@@ -91,6 +92,18 @@ class firrtlCrossModule(val crossScalaVersion: String)
     generatedAntlr4Source() ++ generatedProtoSources() :+ generatedBuildInfo()._2
   }
 
+  // compare version, 1 for (a > b), 0 for (a == b), -1 for (a < b)
+  def versionCompare(a: String, b: String) = {
+    def nums(s: String) = s.split("\\.").map(_.toInt)
+    val pairs = nums(a).zipAll(nums(b), 0, 0).toList
+    def go(ps: List[(Int, Int)]): Int = ps match {
+      case Nil => 0
+      case (a, b) :: t =>
+        if (a > b) 1 else if (a < b) -1 else go(t)
+    }
+    go(pairs)
+  }
+
   /* antlr4 */
   def antlr4Version = "4.9.3"
 
@@ -105,11 +118,28 @@ class firrtlCrossModule(val crossScalaVersion: String)
     // Linux distro package antlr4 as antlr4, while brew package as antlr
     PathRef(Seq("antlr4", "antlr").flatMap { f =>
       try {
-        val systemAntlr4Version = os.proc(f).call(check = false).out.lines.head.split(" ").last
-        if (systemAntlr4Version == antlr4Version || !checkSystemAntlr4Version)
-          Some(os.Path(os.proc("bash", "-c", s"command -v $f").call().out.lines.head))
+        // pattern to extract version from antlr4/antlr version output
+        val versionPattern: Regex = """(?s).*(\d+\.\d+\.\d+).*""".r
+        // get version from antlr4/antlr version output
+        val systemAntlr4Version = os.proc(f).call(check = false).out.text().trim match {
+          case versionPattern(v) => v
+          case _ => "0.0.0"
+        }
+        val systemAntlr4Path = os.Path(os.proc("bash", "-c", s"command -v $f").call().out.text().trim)
+        if (checkSystemAntlr4Version)
+          // Perform strict version checking
+          // check if system antlr4 version is the same as the one we want
+          if (versionCompare(systemAntlr4Version, antlr4Version) == 0)
+            Some(systemAntlr4Path)
+          else
+            None
         else
-          None
+          // Perform a cursory version check, avoid using antlr2
+          // check if system antlr4 version is greater than 4.0.0
+          if (versionCompare(systemAntlr4Version, "4.0.0") >= 0)
+            Some(systemAntlr4Path)
+          else
+            None
       } catch {
         case _: IOException =>
           None
@@ -186,11 +216,28 @@ class firrtlCrossModule(val crossScalaVersion: String)
   def protocPath = T.persistent {
     PathRef({
       try {
-        val systemProtocVersion = os.proc("protoc", "--version").call(check = false).out.lines.head.split(" ").last
-        if (systemProtocVersion == protocVersion || !checkSystemProtocVersion)
-          Some(os.Path(os.proc("bash", "-c", "command -v protoc").call().out.lines.head))
+        // pattern to extract version from protoc version output
+        val versionPattern: Regex = """(?s).*(\d+\.\d+\.\d+).*""".r
+        // get version from protoc version output
+        val systemProtocVersion = os.proc("protoc", "--version").call(check = false).out.text().trim match {
+          case versionPattern(v) => v
+          case _ => "0.0.0"
+        }
+        val systemProtocPath = os.Path(os.proc("bash", "-c", "command -v protoc").call().out.text().trim)
+        if (checkSystemProtocVersion)
+          // Perform strict version checking
+          // check if system protoc version is the same as the one we want
+          if (versionCompare(systemProtocVersion, protocVersion) == 0)
+            Some(systemProtocPath)
+          else
+            None
         else
-          None
+          // Perform a cursory version check
+          // check if system protoc version is greater than 3.0.0
+          if (versionCompare(systemProtocVersion, "3.0.0") >= 0)
+            Some(systemProtocPath)
+          else
+            None
       } catch {
         case _: IOException =>
           None
