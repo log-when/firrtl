@@ -24,7 +24,7 @@ import javax.lang.model.`type`.ReferenceType
 
 object Buchi2TransitionSystem {
 
-  def genIte(bvs:Seq[Tuple2[BVExpr,BVExpr]], defau: BVExpr): BVExpr =
+  def genIte(bvs:mutable.Seq[Tuple2[BVExpr,BVExpr]], defau: BVExpr): BVExpr =
     {
         if(bvs.isEmpty)
         {
@@ -36,7 +36,7 @@ object Buchi2TransitionSystem {
         }
     }
 
-    def genTotalIte(baState:BVSymbol, bvs:Map[Int,Seq[Tuple2[BVExpr,BVExpr]]], defau: BVExpr, stateBits:Int): BVExpr =
+    def genTotalIte(baState:BVSymbol, bvs:mutable.Map[Int,mutable.Seq[Tuple2[BVExpr,BVExpr]]], defau: BVExpr, stateBits:Int): BVExpr =
     {
   //  println(s"remaining: ${bvs.size}")
     if(bvs.isEmpty)
@@ -104,7 +104,7 @@ object Buchi2TransitionSystem {
       //  println(retr.out.string)
       //  println("---")
 
-        val is = new ByteArrayInputStream(retr.out.string.getBytes())
+        val is = new ByteArrayInputStream(retr.out.string().getBytes())
         // 转 BufferedInputStream
         val bis = new BufferedInputStream(is)    
         // 打印
@@ -130,7 +130,7 @@ object Buchi2TransitionSystem {
     // extraInputNum = extraInputNum + h.auxVarNum
     val trans_ = h.transitionFunc
     
-    var totalTransSeq = Map[Int, mutable.Seq[Tuple2[BVExpr,BVExpr]]]()
+    var totalTransSeq = mutable.Map[Int, mutable.Seq[Tuple2[BVExpr,BVExpr]]]()
     for(i <- 0 until h.stateNum)
     {
       var TransSeq: mutable.Seq[Tuple2[BVExpr,BVExpr]] = mutable.Seq[Tuple2[BVExpr,BVExpr]]()
