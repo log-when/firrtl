@@ -21,7 +21,7 @@ lazy val chiseltestRef = ProjectRef(file("../chiseltest") , "chiseltest")
 lazy val firrtlSettings = Seq(
   name := "firrtl",
   version := "1.6-SNAPSHOT",
-  addCompilerPlugin(scalafixSemanticdb),
+  addCompilerPlugin(scalafixSemanticdb("4.5.11")),
   scalacOptions := Seq(
     "-deprecation",
     "-unchecked",
