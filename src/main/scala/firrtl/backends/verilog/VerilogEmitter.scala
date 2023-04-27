@@ -10,12 +10,15 @@ import firrtl.traversals.Foreachers._
 import firrtl.annotations.{
   Annotation,
   CircuitTarget,
+  ModuleTarget,
   MemoryInitAnnotation,
   MemoryLoadFileType,
   MemoryNoSynthInit,
   MemorySynthInit,
   ReferenceTarget,
-  SingleTargetAnnotation
+  SingleTargetAnnotation,
+  Target,
+  NoTargetAnnotation
 }
 import firrtl.passes.LowerTypes
 import firrtl.passes.MemPortUtils._
@@ -24,6 +27,9 @@ import firrtl.transforms.FixAddingNegativeLiterals
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+
+import chiseltest.formal._
+import firrtl.analyses._
 
 object VerilogEmitter {
   private val unaryOps: Set[PrimOp] = Set(Andr, Orr, Xorr, Neg, Not)
@@ -466,6 +472,19 @@ class VerilogEmitter extends SeqTransform with Emitter {
     */
   private[firrtl] class EmissionOptions(annotations: AnnotationSeq) {
     // Private so that we can present an immutable API
+    private val svaEmissionOption = 
+    {
+      val sva :Seq[svaSeqAnno] = annotations.toSeq.filter{_.isInstanceOf[svaSeqAnno]}.map{_.asInstanceOf[svaSeqAnno]}
+      // println(s"sva: $sva")
+      sva
+    }
+    def getSvaEmissionOption(): Seq[svaSeqAnno] = svaEmissionOption
+
+    private val target2ExprEmissonOption = annotations.toSeq.collectFirst{
+      case x:target2ExprAnno => x
+    }
+    def target2Expr(t:Target): Expression = target2ExprEmissonOption.get.asInstanceOf[target2ExprAnno].getMap.get(t).get
+
     private val memoryEmissionOption = new EmissionOptionMap[MemoryEmissionOption](
       annotations.collectFirst { case a: CustomDefaultMemoryEmission => a }.getOrElse(MemoryEmissionOptionDefault)
     )
@@ -1171,7 +1190,75 @@ class VerilogEmitter extends SeqTransform with Emitter {
           }
 
         case _ =>
+      } 
+    }
+
+    def build_sva(): Unit = 
+    {
+      def getModule(seqSva:svaSeqAnno): ModuleTarget =
+      {
+        val modAnno = seqSva.toElementSeq().toSeq.filter(_.isInstanceOf[ModuleAnno])
+        assert(modAnno.size == 1, "one assertion should be only in one module")
+        modAnno(0).asInstanceOf[ModuleAnno].target.asInstanceOf[ModuleTarget]
       }
+
+      // def elementToSVA(e:svaElementAnno):Seq[Any] =
+      // {
+      //   e match
+      //   {
+      //     case x:atom_prop_anno => Seq(" ", emissionOptions.target2Expr(x.signal))
+      //     case x:bin_op_node[_,_] => Seq(x.opString)
+      //     case _ => Seq()
+      //   }  
+      // }
+
+      def addSvaToFormal(
+        formals: mutable.Map[Expression, ArrayBuffer[Seq[Any]]],
+        sva: Seq[sva_node]
+      ): Unit = {
+        val clkTarget = sva.collectFirst{
+          case x:ClockAnno => x
+        }.get.asInstanceOf[ClockAnno].target;
+        val clk = emissionOptions.target2Expr(clkTarget)
+        val enTarget = sva.collectFirst
+        {
+          case x:EnableAnno => x
+        }.get.asInstanceOf[EnableAnno].target;
+        val en = emissionOptions.target2Expr(enTarget)
+
+        val svaSeqs = sva(0).treeDeSerialize(sva.tail)._1.asInstanceOf[svaElementAnno].toSVA(emissionOptions.target2Expr)
+
+        val lines = formals.getOrElseUpdate(clk, ArrayBuffer[Seq[Any]]())
+        lines += Seq("if (", en, ") begin")
+        // addFormal(sx.clk, sx.en, formalStatement(sx.op, sx.pred), sx.info, sx.msg)
+        lines += Seq(tab, Formal.Assert.toString, "(", svaSeqs, " )")
+        // lines += Seq(tab, stmt, info)
+        lines += Seq("end")
+        // println(s"lines: $lines")
+      }
+
+      val totalSva = emissionOptions.getSvaEmissionOption()
+      val modWithSva = totalSva.collect{
+        case s : svaSeqAnno => Map(getModule(s) -> Seq(s.toElementSeq().toSeq.filter(!_.isInstanceOf[ModuleAnno])))
+      }
+      println(s"modWithSva: $modWithSva")
+      val modToSva = mutable.Map[ModuleTarget, Seq[Seq[sva_node]]]()
+      modWithSva.foldLeft(modToSva){
+        case (modToSva,m) => 
+        {
+          assert(m.size == 1)
+          modToSva(m.last._1) = modToSva.getOrElse(m.last._1,Seq()) ++ m.last._2
+          modToSva
+        }
+      }
+      println(s"modToSva: $modToSva")
+      val currentSvas = modToSva.get(moduleTarget).getOrElse(Seq())
+      println(s"currentSvas: $currentSvas")
+      currentSvas.foreach(addSvaToFormal(formals,_))
+      println(moduleTarget)
+      println(s"svaEm: $totalSva")
+      // formals
+      // addFormal
     }
 
     def emit_streams(): Unit = {
@@ -1310,10 +1397,12 @@ class VerilogEmitter extends SeqTransform with Emitter {
       * @return
       */
     def emit_verilog(): DefModule = {
-
+      // println("???")
+      println(m.body)
       build_netlist(m.body)
       build_ports()
       build_streams(m.body)
+      build_sva()
       emit_streams()
       m
     }
@@ -1347,11 +1436,28 @@ class VerilogEmitter extends SeqTransform with Emitter {
 
   def emit(state: CircuitState, writer: Writer): Unit = {
     val cs = runTransforms(state)
-    val emissionOptions = new EmissionOptions(cs.annotations)
+    val irLookup = IRLookup(cs.circuit)
+    val svaTargets = cs.annotations.toSeq.collect{
+      case x:svaSeqAnno => x
+    }
+    .flatMap(x => x.toElementSeq())
+    .collect
+    {
+      case x : atom_prop_anno => x.signal
+      case x : ClockAnno => x.target
+      case x : EnableAnno => x.target
+    }
+    println(s"svaTargets: $svaTargets")
+    // val thisExpr = irLookup.expr(t._3.asInstanceOf[ReferenceTarget])
+    val target2Expr: Map[Target,Expression] = svaTargets.map(t => t -> irLookup.expr(t.asInstanceOf[ReferenceTarget])).toMap
+    
+    println(s"target2Expr: $target2Expr")
+    val emissionOptions = new EmissionOptions(cs.annotations:+target2ExprAnno(target2Expr))
     val moduleMap = cs.circuit.modules.map(m => m.name -> m).toMap
     cs.circuit.modules.foreach {
       case dm @ DescribedMod(d, pds, m: Module) =>
         val renderer = new VerilogRender(d, pds, m, moduleMap, cs.circuit.main, emissionOptions)(writer)
+        
         renderer.emit_verilog()
       case m: Module =>
         val renderer = new VerilogRender(m, moduleMap, cs.circuit.main, emissionOptions)(writer)
