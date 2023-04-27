@@ -36,25 +36,25 @@ object Buchi2TransitionSystem {
         }
     }
 
-    def genTotalIte(baState:BVSymbol, bvs:mutable.Map[Int,mutable.Seq[Tuple2[BVExpr,BVExpr]]], defau: BVExpr, stateBits:Int): BVExpr =
-    {
-  //  println(s"remaining: ${bvs.size}")
-    if(bvs.isEmpty)
-    {
-        defau
-    }
-    else
-    {
-        val ffirst = bvs.head
-        val remaining = bvs - (ffirst._1)
-      //  println(ffirst._2)
-      //  println(genIte(ffirst._2, defau))
-        BVIte(BVEqual(baState, BVLiteral(BigInt(ffirst._1), stateBits)), genIte(ffirst._2, defau), genTotalIte(baState, remaining, defau, stateBits))
-    }
-    }
+  def genTotalIte(baState:BVSymbol, bvs:mutable.Map[Int,mutable.Seq[Tuple2[BVExpr,BVExpr]]], defau: BVExpr, stateBits:Int): BVExpr =
+  {
+//  println(s"remaining: ${bvs.size}")
+  if(bvs.isEmpty)
+  {
+      defau
+  }
+  else
+  {
+      val ffirst = bvs.head
+      val remaining = bvs - (ffirst._1)
+    //  println(ffirst._2)
+    //  println(genIte(ffirst._2, defau))
+      BVIte(BVEqual(baState, BVLiteral(BigInt(ffirst._1), stateBits)), genIte(ffirst._2, defau), genTotalIte(baState, remaining, defau, stateBits))
+  }
+  }
 
-    def bddToSMTExpr(apNum: Int, bdd:BDD, int2Ap:mutable.Map[Int,String], p2target:Map[String,Target], circuit:Circuit, auxVar: Seq[BVSymbol]) : BVExpr = 
-    {
+  def bddToSMTExpr(apNum: Int, bdd:BDD, int2Ap:mutable.Map[Int,String], p2target:Map[String,Target], circuit:Circuit, auxVar: Seq[BVSymbol]) : BVExpr = 
+  {
     if(bdd.isZero())
     {
         BVLiteral(BigInt(0),1)
@@ -83,10 +83,10 @@ object Buchi2TransitionSystem {
       //  println(s"curExpr: $curExpr")
         BVIte(curExpr,high,low)
     }
-    }
+  }
 
-    def genAcc(baState:BVSymbol, accepts:Seq[Int], stateBits:Int): BVExpr =
-    {
+  def genAcc(baState:BVSymbol, accepts:Seq[Int], stateBits:Int): BVExpr =
+  {
     if(accepts.size == 1)
         BVEqual(baState, BVLiteral(BigInt(accepts(0)), stateBits))
     else
@@ -95,37 +95,38 @@ object Buchi2TransitionSystem {
         val firstTerm:BVExpr = accExprs(0)
         accExprs.slice(1,accExprs.size).foldLeft(firstTerm)((a,b) => BVOr(List(a,b)))
     }  
+  }
 
-    }
+  def getDBA(retr:os.CommandResult): hoaParser = 
+  {
+    //  println("---")           
+    //  println(retr.out.string)
+    //  println("---")
 
-    def getDBA(retr:os.CommandResult): hoaParser = 
-    {
-      //  println("---")           
-      //  println(retr.out.string)
-      //  println("---")
-
-        val is = new ByteArrayInputStream(retr.out.string().getBytes())
-        // 转 BufferedInputStream
-        val bis = new BufferedInputStream(is)    
-        // 打印
-        //Stream.continually(bis.read()).takeWhile(_ != -1).foreach(println(_))
-        val h = new hoaParser()
-        HOAFParser.parseHOA(bis,h)    
-        bis.close()
-        is.close()
-        
-      //  println("//////////////////////////")
-      //  println(h.transitionFunc)
-        h.partialDeterministic()
-      //  println("//////////////////////////")
-      //  println(h.transitionFunc)
-        h.addAuxVar()
-        h
-    }
+      val is = new ByteArrayInputStream(retr.out.string().getBytes())
+      // 转 BufferedInputStream
+      val bis = new BufferedInputStream(is)    
+      // 打印
+      //Stream.continually(bis.read()).takeWhile(_ != -1).foreach(println(_))
+      val h = new hoaParser()
+      HOAFParser.parseHOA(bis,h)    
+      bis.close()
+      is.close()
+      
+    //  println("//////////////////////////")
+    //  println(h.transitionFunc)
+      h.partialDeterministic()
+    //  println("//////////////////////////")
+    //  println(h.transitionFunc)
+      h.addAuxVar()
+      h
+  }
 
   def psl2TransitionSystem(h:hoaParser, p2target:Map[String,Target], extraInputNum:Int, BAStateNum:Int, accSignalNum:Int, circuit:Circuit, resetTarget:Target):Tuple3[Seq[BVSymbol], State, Signal] = 
   {
+    println(s"BAAccept: ${h.accStates}")
     val baState = BVSymbol("baState" + BAStateNum + "_", h.stateBits)
+
     val extraInput:Seq[BVSymbol] = (extraInputNum until (extraInputNum + h.auxVarNum)).toSeq.map{case i: Int => BVSymbol("extInput"+i,1)}
     // extraInputNum = extraInputNum + h.auxVarNum
     val trans_ = h.transitionFunc
@@ -154,12 +155,21 @@ object Buchi2TransitionSystem {
     val baState_ = State(baState, None, Some(baStateNext))
 
     val BAAccept = h.accStates
+    println(s"BAAccept: $BAAccept")
     val acceptExpr = genAcc(baState, BAAccept, h.stateBits)
     
-    //Notice: for testing
-    val accSignal = Signal("BAacc" + accSignalNum, acceptExpr, IsBad)
-  //  println("extraInput")
-  //  println(extraInput.toSeq)
+    val r = h.badAccs()
+    // println(s"badAccs: $r")
+
+    // if all accepting states are bad states, liveness to safety is not necessary
+    val accSignal = if (r){
+      Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad) 
+    }
+    else{
+      Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)
+    } 
+    //  println("extraInput")
+    //  println(extraInput.toSeq)
     Tuple3(extraInput, baState_, accSignal)
   }
 }
