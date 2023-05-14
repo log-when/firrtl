@@ -122,7 +122,7 @@ object Buchi2TransitionSystem {
       h
   }
 
-  def psl2TransitionSystem(h:hoaParser, p2target:Map[String,Target], extraInputNum:Int, BAStateNum:Int, accSignalNum:Int, circuit:Circuit, resetTarget:Target):Tuple3[Seq[BVSymbol], State, Signal] = 
+  def psl2TransitionSystem(h:hoaParser, p2target:Map[String,Target], extraInputNum:Int, BAStateNum:Int, accSignalNum:Int, circuit:Circuit, resetTarget:Target, svastmt:svaStmt):Tuple3[Seq[BVSymbol], State, Signal] = 
   {
     println(s"BAAccept: ${h.accStates}")
     val baState = BVSymbol("baState" + BAStateNum + "_", h.stateBits)
@@ -163,11 +163,31 @@ object Buchi2TransitionSystem {
 
     // if all accepting states are bad states, liveness to safety is not necessary
     val accSignal = if (r){
-      Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad) 
+      if (svastmt == svaAssertStmt)
+        Signal("BAacc" + accSignalNum, acceptExpr, IsBad)
+      else
+        Signal("BAacc" + accSignalNum, acceptExpr, IsConstraint)
+      // svastmt match{
+      //   case svaAssertStmt => Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad) 
+      //   case svaAssumeStmt => Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsConstraint) 
+      // }
     }
     else{
-      Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)
+      println(s"this!!!: ${svastmt}")
+      println(s"this!!!: ${svaAssertStmt == svaAssumeStmt}")
+      if (svastmt == svaAssertStmt)
+        Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)
+      else
+        Signal("BAacc" + accSignalNum, acceptExpr, IsFair)
+
+      //Some match-case bug!
+      // svastmt match{
+      //   case svaAssumeStmt => Signal("BAacc" + accSignalNum, acceptExpr, IsFair)  
+      //   case svaAssertStmt => {println(IsJustice); Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)}
+      //   case _ => Signal("BAacc" + accSignalNum, acceptExpr, IsFair) 
+      // }
     } 
+    println(s"accSignal: $accSignal")
     //  println("extraInput")
     //  println(extraInput.toSeq)
     Tuple3(extraInput, baState_, accSignal)

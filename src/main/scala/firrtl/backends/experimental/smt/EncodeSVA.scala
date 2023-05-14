@@ -36,7 +36,7 @@ object EncodeSVA extends Transform with DependencyAPIMigration {
   override def optionalPrerequisites: Seq[TransformDependency] = Seq(Dependency[firrtl.passes.InlineInstances])
 
   // sys: original transition system, extraInputNum: 
-  private def encodeProps(sysWithSVA:TransitionSystem, accSignals:mutable.Seq[Signal]): TransitionSystem={
+  private def encodeProps(sysWithSVA:TransitionSystem, accSignals:mutable.Seq[Signal], resetSignals:Seq[BVExpr]): TransitionSystem={
 
     println(s"accSignals: $accSignals")
     val just2BadStatesMap = sysWithSVA.states.filter
@@ -62,10 +62,11 @@ object EncodeSVA extends Transform with DependencyAPIMigration {
       }
     }
     
-    val noJust = accSignals.filter(_.lbl == IsJustice).isEmpty
-    println(s"noJust: $noJust")
-    var auxJust2BadStates = if (noJust) mutable.Seq[State]() else just2BadStatesMap.map{_._2}.toSeq
-    var badSignals:mutable.Seq[Signal] = mutable.Seq[Signal]()
+    // if all properties are safety properties, don't execute L2S 
+    val noLive = accSignals.filter(x => x.lbl == IsJustice | x.lbl == IsFair).isEmpty
+    println(s"noLive: $noLive")
+    var auxJust2BadStates = if (noLive) mutable.Seq[State]() else just2BadStatesMap.map{_._2}.toSeq
+    var safeSignals:mutable.Seq[Signal] = mutable.Seq[Signal]()
     val correspEquals = just2BadStatesMap.map{
       case t:Tuple2[State,State] =>
         if(t._1.sym.isInstanceOf[BVSymbol])
@@ -80,27 +81,28 @@ object EncodeSVA extends Transform with DependencyAPIMigration {
     var correspEqual = BVAnd(correspEquals)
     for(i <- 0 until accSignals.size)
     {
-      if (accSignals(i).lbl == IsBad) {
-        badSignals +:= accSignals(i)
+      if (accSignals(i).lbl == IsBad | accSignals(i).lbl == IsConstraint) {
+        safeSignals +:= accSignals(i)
       }
-      else if (accSignals(i).lbl == IsJustice){
-        // val reset = resetSignals(i)
+      else if (accSignals(i).lbl == IsJustice | accSignals(i).lbl == IsFair){
+        val reset = resetSignals(i)
         val seenSymbol = BVSymbol("seen"+"_"+i+"_",1)
-        // val seen:State = State(seenSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVAnd(List(BVOr(List(correspEqual,seenSymbol)),BVNot(reset)))))
-        val seen:State = State(seenSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVOr(List(correspEqual,seenSymbol))))
+        val seen:State = State(seenSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVAnd(List(BVOr(List(correspEqual,seenSymbol)),BVNot(reset)))))
+        // val seen:State = State(seenSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVOr(List(correspEqual,seenSymbol))))
         auxJust2BadStates +:= seen
 
         val triggeredSymbol = BVSymbol("triggered"+"_"+i+"_",1)
-        val triggered:State = State(triggeredSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVOr(List(triggeredSymbol,BVAnd(List(accSignals(i).e.asInstanceOf[BVExpr],seenSymbol))))))
-        // val triggered:State = State(triggeredSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVAnd(List(BVOr(List(triggeredSymbol,BVAnd(List(accSignals(i).e.asInstanceOf[BVExpr],seenSymbol)))),BVNot(reset)))))
+        // val triggered:State = State(triggeredSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVOr(List(triggeredSymbol,BVAnd(List(accSignals(i).e.asInstanceOf[BVExpr],seenSymbol))))))
+        val triggered:State = State(triggeredSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVAnd(List(BVOr(List(triggeredSymbol,BVAnd(List(accSignals(i).e.asInstanceOf[BVExpr],seenSymbol)))),BVNot(reset)))))
         auxJust2BadStates +:= triggered
 
-        val loop = Signal("just2Bad" + i + "_", BVAnd(List(triggeredSymbol,correspEqual)) , IsBad)
-        // val loop = Signal("just2Bad" + i + "_", BVAnd(List(triggeredSymbol,correspEqual):+BVNot(reset)) , IsBad)
-        badSignals +:= loop
+        val label = if (accSignals(i).lbl == IsJustice) IsBad else IsConstraint
+        // val loop = Signal("just2Bad" + i + "_", BVAnd(List(triggeredSymbol,correspEqual)) , IsBad)
+        val loop = Signal("just2Bad" + i + "_", BVAnd(List(triggeredSymbol,correspEqual):+BVNot(reset)) , label)
+        safeSignals +:= loop
       }
     }
-    sysWithSVA.copy(sysWithSVA.name,sysWithSVA.inputs,sysWithSVA.states:::auxJust2BadStates.toList,sysWithSVA.signals:::badSignals.toList,sysWithSVA.comments,sysWithSVA.header)
+    sysWithSVA.copy(sysWithSVA.name,sysWithSVA.inputs,sysWithSVA.states:::auxJust2BadStates.toList,sysWithSVA.signals:::safeSignals.toList,sysWithSVA.comments,sysWithSVA.header)
   }
 
   override protected def execute(state: CircuitState): CircuitState = {
@@ -108,7 +110,7 @@ object EncodeSVA extends Transform with DependencyAPIMigration {
     val circuit = state.circuit
     val sys = state.annotations.filter{_.isInstanceOf[TransitionSystemAnnotation]}.head.asInstanceOf[TransitionSystemAnnotation].sys
 
-    val svaAnnos : AnnotationSeq = state.annotations.filter {_.isInstanceOf[svaSeqAnno]}
+    val svaAnnos : AnnotationSeq = state.annotations.filter {_.isInstanceOf[svaAnno]}
     //println(s"svaAnnos: ($svaAnnos).toSeq")
     val sortedSys =
     if(!svaAnnos.isEmpty)
@@ -117,9 +119,9 @@ object EncodeSVA extends Transform with DependencyAPIMigration {
       require(targetDirs.nonEmpty, "Expected exactly one target directory, got none!")
       require(targetDirs.size == 1, s"Expected exactly one target directory, got multiple: $targetDirs")
 
-      val pslsWithMap : Seq[Tuple3[String, Map[String,Target], Target]] = svaAnnos.collect{
+      val pslsWithMap : Seq[Tuple4[String, Map[String,Target], Target, svaStmt]] = svaAnnos.collect{
       // val pslsWithMap : Seq[Tuple2[String, Map[String,Target]]] = svaAnnos.collect{
-        case s: svaSeqAnno => svaSeqAnno.SVAAnno2PSL(s)
+        case s: svaAnno => svaAnno.SVAAnno2PSL(s)
       }
 
       var extraInputNum: Int = 0
@@ -131,7 +133,7 @@ object EncodeSVA extends Transform with DependencyAPIMigration {
 
       val irLookup = IRLookup(circuit)
       val resetSignals:Seq[BVExpr] = pslsWithMap.collect{
-        case t: Tuple3[String, Map[String,Target],Target] => 
+        case t: Tuple4[String, Map[String,Target], Target, svaStmt] => 
         // case t: Tuple2[String, Map[String,Target]] => 
         {
           val thisExpr = irLookup.expr(t._3.asInstanceOf[ReferenceTarget])
@@ -140,14 +142,14 @@ object EncodeSVA extends Transform with DependencyAPIMigration {
       }
 
       val toTransitionSystems: Unit = pslsWithMap.collect{
-        case t: Tuple3[String, Map[String,Target],Target] => 
+        case t: Tuple4[String, Map[String,Target], Target, svaStmt] => 
         // case t: Tuple2[String, Map[String,Target],Target] => 
         {
           val cmd = Seq("ltl2tgba","-B","-D", "-f", t._1)
           val retr:os.CommandResult = os.proc(cmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
           
           val dba = Buchi2TransitionSystem.getDBA(retr)
-          val ret = Buchi2TransitionSystem.psl2TransitionSystem(dba, t._2, extraInputNum, baStateNum, accSignalNum, circuit, t._3)
+          val ret = Buchi2TransitionSystem.psl2TransitionSystem(dba, t._2, extraInputNum, baStateNum, accSignalNum, circuit, t._3, t._4)
           extraInputs ++= ret._1
           baStates :+= ret._2
           accSignals :+= ret._3
@@ -158,7 +160,7 @@ object EncodeSVA extends Transform with DependencyAPIMigration {
       }
 
       val sysWithSVA = sys.copy(sys.name,sys.inputs:::extraInputs.toList,sys.states:::baStates.toList, sys.signals,sys.comments,sys.header)
-      val sysJust2Bad = encodeProps(sysWithSVA,accSignals)
+      val sysJust2Bad = encodeProps(sysWithSVA, accSignals, resetSignals)
       TopologicalSort.run(sysJust2Bad)
     }
     else

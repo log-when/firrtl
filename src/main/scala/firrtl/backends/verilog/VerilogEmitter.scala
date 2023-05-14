@@ -474,11 +474,11 @@ class VerilogEmitter extends SeqTransform with Emitter {
     // Private so that we can present an immutable API
     private val svaEmissionOption = 
     {
-      val sva :Seq[svaSeqAnno] = annotations.toSeq.filter{_.isInstanceOf[svaSeqAnno]}.map{_.asInstanceOf[svaSeqAnno]}
+      val sva :Seq[svaAnno] = annotations.toSeq.filter{_.isInstanceOf[svaAnno]}.map{_.asInstanceOf[svaAnno]}
       // println(s"sva: $sva")
       sva
     }
-    def getSvaEmissionOption(): Seq[svaSeqAnno] = svaEmissionOption
+    def getSvaEmissionOption(): Seq[svaAnno] = svaEmissionOption
 
     private val target2ExprEmissonOption = annotations.toSeq.collectFirst{
       case x:target2ExprAnno => x
@@ -1195,7 +1195,7 @@ class VerilogEmitter extends SeqTransform with Emitter {
 
     def build_sva(): Unit = 
     {
-      def getModule(seqSva:svaSeqAnno): ModuleTarget =
+      def getModule(seqSva:svaAnno): ModuleTarget =
       {
         val modAnno = seqSva.toElementSeq().toSeq.filter(_.isInstanceOf[ModuleAnno])
         assert(modAnno.size == 1, "one assertion should be only in one module")
@@ -1239,7 +1239,7 @@ class VerilogEmitter extends SeqTransform with Emitter {
 
       val totalSva = emissionOptions.getSvaEmissionOption()
       val modWithSva = totalSva.collect{
-        case s : svaSeqAnno => Map(getModule(s) -> Seq(s.toElementSeq().toSeq.filter(!_.isInstanceOf[ModuleAnno])))
+        case s : svaAnno => Map(getModule(s) -> Seq(s.toElementSeq().toSeq.filter(!_.isInstanceOf[ModuleAnno])))
       }
       println(s"modWithSva: $modWithSva")
       val modToSva = mutable.Map[ModuleTarget, Seq[Seq[sva_node]]]()
@@ -1438,7 +1438,7 @@ class VerilogEmitter extends SeqTransform with Emitter {
     val cs = runTransforms(state)
     val irLookup = IRLookup(cs.circuit)
     val svaTargets = cs.annotations.toSeq.collect{
-      case x:svaSeqAnno => x
+      case x:svaAnno => x
     }
     .flatMap(x => x.toElementSeq())
     .collect
