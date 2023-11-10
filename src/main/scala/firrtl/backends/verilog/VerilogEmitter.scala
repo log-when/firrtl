@@ -472,13 +472,13 @@ class VerilogEmitter extends SeqTransform with Emitter {
     */
   private[firrtl] class EmissionOptions(annotations: AnnotationSeq) {
     // Private so that we can present an immutable API
-    private val svaEmissionOption = 
+    private val chaEmissionOption = 
     {
-      val sva :Seq[svaAnno] = annotations.toSeq.filter{_.isInstanceOf[svaAnno]}.map{_.asInstanceOf[svaAnno]}
-      // println(s"sva: $sva")
-      sva
+      val cha :Seq[chaAnno] = annotations.toSeq.filter{_.isInstanceOf[chaAnno]}.map{_.asInstanceOf[chaAnno]}
+      // println(s"cha: $cha")
+      cha
     }
-    def getSvaEmissionOption(): Seq[svaAnno] = svaEmissionOption
+    def getCHAEmissionOption(): Seq[chaAnno] = chaEmissionOption
 
     private val target2ExprEmissonOption = annotations.toSeq.collectFirst{
       case x:target2ExprAnno => x
@@ -1058,7 +1058,8 @@ class VerilogEmitter extends SeqTransform with Emitter {
           simulate(sx.clk, sx.en, stop(sx.ret), Some("STOP_COND"), sx.info)
         case sx: Print =>
           simulate(sx.clk, sx.en, printf(sx.string, sx.args), Some("PRINTF_COND"), sx.info)
-        case sx: Verification =>
+        case sx: Verification =>  
+          // println(s"original assert: ${sx.pred}")
           addFormal(sx.clk, sx.en, formalStatement(sx.op, sx.pred), sx.info, sx.msg)
         // If we are emitting an Attach, it must not have been removable in VerilogPrep
         case sx: Attach =>
@@ -1195,68 +1196,70 @@ class VerilogEmitter extends SeqTransform with Emitter {
 
     def build_sva(): Unit = 
     {
-      def getModule(seqSva:svaAnno): ModuleTarget =
+      def getModule(seqCHA:chaAnno): ModuleTarget =
       {
-        val modAnno = seqSva.toElementSeq().toSeq.filter(_.isInstanceOf[ModuleAnno])
+        val modAnno = seqCHA.toElementSeq().toSeq.filter(_.isInstanceOf[ModuleAnno])
         assert(modAnno.size == 1, "one assertion should be only in one module")
         modAnno(0).asInstanceOf[ModuleAnno].target.asInstanceOf[ModuleTarget]
       }
 
-      // def elementToSVA(e:svaElementAnno):Seq[Any] =
-      // {
-      //   e match
-      //   {
-      //     case x:atom_prop_anno => Seq(" ", emissionOptions.target2Expr(x.signal))
-      //     case x:bin_op_node[_,_] => Seq(x.opString)
-      //     case _ => Seq()
-      //   }  
-      // }
-
-      def addSvaToFormal(
+      def addCHAToFormal(
         formals: mutable.Map[Expression, ArrayBuffer[Seq[Any]]],
-        sva: Seq[sva_node]
+        chaSeq: chaAnno
       ): Unit = {
-        val clkTarget = sva.collectFirst{
+        val cha = chaSeq.toElementSeq().toSeq
+
+        val state = 
+          if (chaSeq.isInstanceOf[chaAssertAnno])
+            Formal.Assert.toString
+          else if(chaSeq.isInstanceOf[chaAssumeAnno])
+            Formal.Assume.toString
+          else
+            ""
+
+        val clkTarget = cha.collectFirst{
           case x:ClockAnno => x
         }.get.asInstanceOf[ClockAnno].target;
         val clk = emissionOptions.target2Expr(clkTarget)
-        val enTarget = sva.collectFirst
+        val enTarget = cha.collectFirst
         {
           case x:EnableAnno => x
         }.get.asInstanceOf[EnableAnno].target;
         val en = emissionOptions.target2Expr(enTarget)
 
-        val svaSeqs = sva(0).treeDeSerialize(sva.tail)._1.asInstanceOf[svaElementAnno].toSVA(emissionOptions.target2Expr)
+        val chaSeqs = cha(0).treeDeSerialize(cha.tail)._1.asInstanceOf[chaElementAnno].toSVA(emissionOptions.target2Expr)
 
         val lines = formals.getOrElseUpdate(clk, ArrayBuffer[Seq[Any]]())
         lines += Seq("if (", en, ") begin")
         // addFormal(sx.clk, sx.en, formalStatement(sx.op, sx.pred), sx.info, sx.msg)
-        lines += Seq(tab, Formal.Assert.toString, "(", svaSeqs, " )")
+        lines += Seq(tab, state, " property ", "(", chaSeqs, " );")
         // lines += Seq(tab, stmt, info)
         lines += Seq("end")
         // println(s"lines: $lines")
       }
 
-      val totalSva = emissionOptions.getSvaEmissionOption()
-      val modWithSva = totalSva.collect{
-        case s : svaAnno => Map(getModule(s) -> Seq(s.toElementSeq().toSeq.filter(!_.isInstanceOf[ModuleAnno])))
+      val totalCHA = emissionOptions.getCHAEmissionOption()
+      println(s"totalCHA: $totalCHA")
+      val modWithCHA = totalCHA.collect{
+        case s : chaAssumeAnno => Map(getModule(s) -> Seq(s))
+        case s : chaAssertAnno => Map(getModule(s) -> Seq(s))
       }
-      println(s"modWithSva: $modWithSva")
-      val modToSva = mutable.Map[ModuleTarget, Seq[Seq[sva_node]]]()
-      modWithSva.foldLeft(modToSva){
-        case (modToSva,m) => 
+      println(s"modWithCHA: $modWithCHA")
+      val modToCHA = mutable.Map[ModuleTarget, Seq[chaAnno]]()
+      modWithCHA.foldLeft(modToCHA){
+        case (modToCHA,m) => 
         {
           assert(m.size == 1)
-          modToSva(m.last._1) = modToSva.getOrElse(m.last._1,Seq()) ++ m.last._2
-          modToSva
+          modToCHA(m.last._1) = modToCHA.getOrElse(m.last._1,Seq()) ++ m.last._2
+          modToCHA
         }
       }
-      println(s"modToSva: $modToSva")
-      val currentSvas = modToSva.get(moduleTarget).getOrElse(Seq())
-      println(s"currentSvas: $currentSvas")
-      currentSvas.foreach(addSvaToFormal(formals,_))
-      println(moduleTarget)
-      println(s"svaEm: $totalSva")
+      println(s"modToCHA: $modToCHA")
+      val currentCHAs = modToCHA.get(moduleTarget).getOrElse(Seq())
+      // println(s"currentCHAs: $currentCHAs")
+      currentCHAs.foreach(addCHAToFormal(formals,_))
+      // println(moduleTarget)
+      // println(s"chaEm: $totalCHA")
       // formals
       // addFormal
     }
@@ -1397,8 +1400,6 @@ class VerilogEmitter extends SeqTransform with Emitter {
       * @return
       */
     def emit_verilog(): DefModule = {
-      // println("???")
-      println(m.body)
       build_netlist(m.body)
       build_ports()
       build_streams(m.body)
@@ -1435,10 +1436,45 @@ class VerilogEmitter extends SeqTransform with Emitter {
   def transforms = new TransformManager(firrtl.stage.Forms.VerilogOptimized, prerequisites).flattenedTransformOrder
 
   def emit(state: CircuitState, writer: Writer): Unit = {
+    // println(s"transforms: ${this.transforms.toSeq}")
+    // println(s"before transformation: ${state.circuit}")
+    println(s"before transformation: ${state.circuit.serialize}")
     val cs = runTransforms(state)
+    
+    val state_cha = state.annotations.toSeq.collect{
+      case x:chaAnno => x
+    }
+    println(s"state_cha: ${state_cha}")
+    
+    // println(s"transformation: ${state.annotations.toSeq}")
+
+    val state_chaTargets = state.annotations.toSeq.collect{
+      case x:chaAnno => x
+    }
+    .flatMap(x => x.toElementSeq())
+    .collect
+    {
+      case x : atom_prop_anno => x.signal.getComplete.get.asInstanceOf[ReferenceTarget]
+      case x : ClockAnno => x.target.getComplete.get.asInstanceOf[ReferenceTarget]
+      case x : EnableAnno => x.target.getComplete.get.asInstanceOf[ReferenceTarget]
+    }
+
+    state_chaTargets.foreach
+    {
+      state_chaTargets =>
+      println(s"circuit1: ${Target.getReferenceTarget(state_chaTargets).circuit}")
+      println(s"module1: ${state_chaTargets.asInstanceOf[ReferenceTarget].module}")
+      println(s"path1: ${Target.getReferenceTarget(state_chaTargets).asInstanceOf[ReferenceTarget].path}")
+      println(s"ref1: ${Target.getReferenceTarget(state_chaTargets).asInstanceOf[ReferenceTarget].ref}")
+      println(s"component1: ${Target.getReferenceTarget(state_chaTargets).asInstanceOf[ReferenceTarget].component}")
+    }
+    println(s"state_chaTargets: ${state_chaTargets}")
+
+    // println(s"after transformation: ${cs.circuit.serialize}")
     val irLookup = IRLookup(cs.circuit)
-    val svaTargets = cs.annotations.toSeq.collect{
-      case x:svaAnno => x
+
+    val chaTargets = cs.annotations.toSeq.collect{
+      case x:chaAnno => x
     }
     .flatMap(x => x.toElementSeq())
     .collect
@@ -1447,11 +1483,21 @@ class VerilogEmitter extends SeqTransform with Emitter {
       case x : ClockAnno => x.target
       case x : EnableAnno => x.target
     }
-    println(s"svaTargets: $svaTargets")
-    // val thisExpr = irLookup.expr(t._3.asInstanceOf[ReferenceTarget])
-    val target2Expr: Map[Target,Expression] = svaTargets.map(t => t -> irLookup.expr(t.asInstanceOf[ReferenceTarget])).toMap
     
-    println(s"target2Expr: $target2Expr")
+    println(s"chaTargets: $chaTargets")
+    // val thisExpr = irLookup.expr(t._3.asInstanceOf[ReferenceTarget])
+    val target2Expr = chaTargets.map(t => t -> 
+      {
+        // println(s"target: ${t.serialize}")
+        // println(s"circuit: ${t.asInstanceOf[ReferenceTarget].circuit}")
+        // println(s"module: ${t.asInstanceOf[ReferenceTarget].module}")
+        // println(s"path: ${t.asInstanceOf[ReferenceTarget].path}")
+        // println(s"ref: ${t.asInstanceOf[ReferenceTarget].ref}")
+        // println(s"component: ${t.asInstanceOf[ReferenceTarget].component}")
+        irLookup.expr(t.asInstanceOf[ReferenceTarget])
+      }).toMap
+    
+    // println(s"target2Expr: $target2Expr")
     val emissionOptions = new EmissionOptions(cs.annotations:+target2ExprAnno(target2Expr))
     val moduleMap = cs.circuit.modules.map(m => m.name -> m).toMap
     cs.circuit.modules.foreach {
@@ -1467,6 +1513,7 @@ class VerilogEmitter extends SeqTransform with Emitter {
   }
 
   override def execute(state: CircuitState): CircuitState = {
+    // println(s"why?  ${state.circuit}")
     val writerToString =
       (writer: java.io.StringWriter) => writer.toString.replaceAll("""(?m) +$""", "") // trim trailing whitespace
 
@@ -1504,6 +1551,7 @@ class VerilogEmitter extends SeqTransform with Emitter {
         }
       case _ => Seq()
     }
+
     state.copy(annotations = newAnnos ++ state.annotations)
   }
 }

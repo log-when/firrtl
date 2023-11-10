@@ -7,8 +7,13 @@ import firrtl.ir._
 import firrtl.Mappers._
 import firrtl.options.Dependency
 import firrtl._
+import firrtl.annotations._
+
+import firrtl.renamemap.MutableRenameMap
 
 import scala.collection.mutable
+
+import chiseltest.formal._
 
 /** Makes changes to the Firrtl AST to make Verilog emission easier
   *
@@ -52,6 +57,7 @@ object VerilogPrep extends Pass {
 
     def onStmt(stmt: Statement): Statement = stmt.map(onStmt) match {
       case attach: Attach =>
+        // println(s"attach: $attach")
         val wires = attach.exprs.groupBy(kind)
         val sources = wires.getOrElse(PortKind, Seq.empty) ++ wires.getOrElse(WireKind, Seq.empty)
         val instPorts = wires.getOrElse(InstanceKind, Seq.empty)
@@ -72,15 +78,21 @@ object VerilogPrep extends Pass {
           case moreThanOne =>
             attach
         }
-      case s => s
+      case s => 
+      {
+        // println(s"else: $s")
+        s
+      }
     }
-
+    // println(s"sourceMap: $sourceMap")
     (m.map(onStmt), sourceMap.toMap)
   }
 
   def run(c: Circuit): Circuit = {
     def lowerE(e: Expression): Expression = e match {
       case (_: WRef | _: WSubField) if kind(e) == InstanceKind =>
+        // println(s"e: $e")
+        // println(s"this: ${this}")
         WRef(LowerTypes.loweredName(e), e.tpe, kind(e), flow(e))
       case _ => e.map(lowerE)
     }
@@ -102,11 +114,112 @@ object VerilogPrep extends Pass {
         Block(wires.flatten :+ newInst)
       case other => other.map(lowerS(attachMap)).map(lowerE)
     }
-
+    
+    println(s"calls: ${this}")
+    // println(s"modules: ${c.modules}")
     val modulesx = c.modules.map { mod =>
       val (modx, attachMap) = collectAndRemoveAttach(mod)
       modx.map(lowerS(attachMap))
     }
     c.copy(modules = modulesx)
+  }
+
+  // def onStmt(s: Statement): Statement = s match {
+  //   case mem: DefMemory if canSimplify(mem) => simplifyMem(mem)
+  //   case s => s.map(onStmt).map(onExpr)
+  // }
+  def onModule(c: Circuit, renames: MutableRenameMap)(m: DefModule): DefModule = {
+    def lowerE(e: Expression): Expression = e match {
+      case _:WRef if kind(e) == InstanceKind =>
+        // println(s"e: $e")
+        // val mTarget = ModuleTarget(c.main, m.name)
+        // val oldRT = Target.asTarget(mTarget)(e)
+        // println(s"oldRT: ${oldRT}")
+        WRef(LowerTypes.loweredName(e), e.tpe, kind(e), flow(e))
+      case _:WSubField if kind(e) == InstanceKind =>
+        // println(s"e: $e")
+        // val mTarget = ModuleTarget(c.main, m.name)
+        // val oldRT = Target.asTarget(mTarget)(e)
+        // println(s"oldRT: ${oldRT}")
+        val wire = WRef(LowerTypes.loweredName(e), e.tpe, kind(e), flow(e))
+        
+        // val newRT = Target.asTarget(mTarget)(wire)     
+        // println(s"newRT: ${newRT}")
+
+        wire
+      // case (_: WRef | _: WSubField) if kind(e) == InstanceKind =>
+      //   println(s"e: $e")
+      //   val mTarget = ModuleTarget(c.main, m.name)
+      //   val oldRT = mTarget.ref(e.name)
+      //   println(s"oldRT: ${oldRT}")
+      //   WRef(LowerTypes.loweredName(e), e.tpe, kind(e), flow(e))
+      case _ => e.map(lowerE)
+    }
+
+    def lowerS(attachMap: AttachSourceMap)(s: Statement): Statement = s match {
+      case t@WDefInstance(info, name, module, tpe) =>
+        val portRefs = create_exps(WRef(name, tpe, ExpKind, SourceFlow))
+        val (portCons, wires) = portRefs.map { p =>
+          attachMap.get(p) match {
+            // If it has a source in attachMap use that
+            case Some(ref) => (p -> ref, None)
+            // If no source, create a wire corresponding to the port and connect it up
+            case None =>
+              
+              // println(s"p: ${p}")
+              val WSubField(sexpr,sname,_,_) = p
+              // println(s"sexpr: ${sexpr}")
+              
+              val mTarget = ModuleTarget(c.main, m.name)
+
+              val oldRT = Target.asTarget(mTarget)(p)
+
+              val inlineTarget = mTarget.instOf(name, module)
+              val temp = inlineTarget.ref(sname)
+              val temp2 = mTarget.instOf(name, module).ofModuleTarget.ref(sname)
+
+              // println(s"temp2: ${temp2}")
+              // // val oldRT = mTarget.ref(sname)
+              // println(s"oldRT2: ${oldRT}")
+              // println(s"circuit: ${oldRT.asInstanceOf[ReferenceTarget].circuit}")
+              // println(s"module: ${oldRT.asInstanceOf[ReferenceTarget].module}")
+              // println(s"path: ${oldRT.asInstanceOf[ReferenceTarget].path}")
+              // println(s"ref: ${oldRT.asInstanceOf[ReferenceTarget].ref}")
+              // println(s"component: ${oldRT.asInstanceOf[ReferenceTarget].component}")
+
+              // ~CounterProp1|CounterProp1/comp1:Counter>io_ts
+              val wire = DefWire(info, LowerTypes.loweredName(p), p.tpe)
+              // println(s"wire: ${wire}")
+              val newRT = mTarget.ref(LowerTypes.loweredName(p))
+              
+              println(s"update RT: ${temp}, ${temp2}, ${newRT}")
+              renames.record(temp, newRT)
+              renames.record(temp2, newRT)
+              (p -> WRef(wire), Some(wire))
+          }
+        }.unzip
+        val newInst = WDefInstanceConnector(info, name, module, tpe, portCons)
+        Block(wires.flatten :+ newInst)
+      case other => other.map(lowerS(attachMap)).map(lowerE)
+    }
+
+    
+    val (modx, attachMap) = collectAndRemoveAttach(m)
+    val resutlModule = modx.map(lowerS(attachMap))
+    // println(s"renames: ${renames._underlying}")
+    resutlModule
+  }
+
+  override def execute(state: CircuitState): CircuitState = {
+    // println(s"executes: ${state.circuit.serialize}")
+    val c = state.circuit
+    val renames = MutableRenameMap()
+    val state_cha = state.annotations.toSeq.collect{
+      case x:chaAnno => x
+    }
+    println(s"state_cha: ${state_cha}")
+    state.copy(circuit = c.map(onModule(c, renames)), renames = Some(renames))
+
+    // state.copy(circuit = run(state.circuit))
   }
 }

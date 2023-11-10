@@ -70,7 +70,7 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
         a.target.module -> a
     }.toMap
     
-    // println(SVAAnnos.toSeq)
+    // println(CHAAnnos.toSeq)
     // ExtModuleException: Generally used for Verilog black boxes
     // see line 34, inlining has happened
     // convert the main module
@@ -120,9 +120,9 @@ private class ModuleToTransitionSystem(
 
   def run(m: ir.Module): TransitionSystem = {
     // println(m)
-    // println(svaanno)
+    // println(chaanno)
     // val irLookup = IRLookup(circuit)
-    // signals.append(Signal("svaBad", e = onExpression(svaExpr(0)), lbl = IsBad))
+    // signals.append(Signal("chaBad", e = onExpression(chaExpr(0)), lbl = IsBad))
 
     // first pass over the module to convert expressions; discover state and I/O
     m.foreachPort(onPort)

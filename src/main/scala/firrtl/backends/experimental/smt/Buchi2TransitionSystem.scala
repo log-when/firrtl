@@ -39,49 +39,68 @@ object Buchi2TransitionSystem {
   def genTotalIte(baState:BVSymbol, bvs:mutable.Map[Int,mutable.Seq[Tuple2[BVExpr,BVExpr]]], defau: BVExpr, stateBits:Int): BVExpr =
   {
 //  println(s"remaining: ${bvs.size}")
-  if(bvs.isEmpty)
-  {
+    if(bvs.isEmpty)
+    {
       defau
-  }
-  else
-  {
+    }
+    else
+    {
       val ffirst = bvs.head
       val remaining = bvs - (ffirst._1)
-    //  println(ffirst._2)
-    //  println(genIte(ffirst._2, defau))
+      //  println(ffirst._2)
+      //  println(genIte(ffirst._2, defau))
       BVIte(BVEqual(baState, BVLiteral(BigInt(ffirst._1), stateBits)), genIte(ffirst._2, defau), genTotalIte(baState, remaining, defau, stateBits))
-  }
+    }
   }
 
   def bddToSMTExpr(apNum: Int, bdd:BDD, int2Ap:mutable.Map[Int,String], p2target:Map[String,Target], circuit:Circuit, auxVar: Seq[BVSymbol]) : BVExpr = 
   {
     if(bdd.isZero())
     {
-        BVLiteral(BigInt(0),1)
+      BVLiteral(BigInt(0),1)
     }
     else if(bdd.isOne())
     {
-        BVLiteral(BigInt(1),1)
+      BVLiteral(BigInt(1),1)
     }
     else
     {
-        val low:BVExpr = bddToSMTExpr(apNum,bdd.low(),int2Ap,p2target,circuit,auxVar)
-        val high:BVExpr = bddToSMTExpr(apNum,bdd.high(),int2Ap,p2target,circuit,auxVar)
-        val atom:Int = bdd.`var`()
-        val curExpr = 
+      val atom:Int = bdd.`var`()
+      val curExpr = 
         if(atom < apNum)
         {
-            val thisTarget = p2target(int2Ap(bdd.`var`()))
-            val irLookup = IRLookup(circuit)
-            val thisExpr = irLookup.expr(thisTarget.asInstanceOf[ReferenceTarget])
-            FirrtlExpressionSemantics.toSMT(thisExpr)
+          val thisTarget = p2target(int2Ap(bdd.`var`()))
+          val irLookup = IRLookup(circuit)
+          val thisExpr = irLookup.expr(thisTarget.asInstanceOf[ReferenceTarget])
+          FirrtlExpressionSemantics.toSMT(thisExpr)
         }
         else
         {
-            auxVar(atom-apNum)
+          auxVar(atom-apNum)
         }
-      //  println(s"curExpr: $curExpr")
-        BVIte(curExpr,high,low)
+
+      val low:BVExpr = bddToSMTExpr(apNum,bdd.low(),int2Ap,p2target,circuit,auxVar)
+      val high:BVExpr = bddToSMTExpr(apNum,bdd.high(),int2Ap,p2target,circuit,auxVar)
+      
+      // low: 0,x,1; high:0,x,1; (0,0),(1,1) are checked before
+      if(bdd.low.isZero())
+        if(bdd.high.isOne())  //(1,0)
+          curExpr
+        else                  //(x,0)
+          BVAnd(List(curExpr,high)) 
+      else if(bdd.high.isZero())
+        if(bdd.low.isOne())   //(0,1)
+          BVNot(curExpr)
+        else                  //(0,x)
+          BVAnd(List(BVNot(curExpr),low))
+      else if(bdd.high.isOne) //(1,x)
+        BVOr(List(curExpr, BVAnd(List(BVNot(curExpr),low))))
+      else if(bdd.low.isOne)  //(x,1)
+        BVOr(List(BVNot(curExpr), BVAnd(List(curExpr,high))))
+      else                    //(x,x)
+        BVOr(List(BVAnd(List(curExpr,high)), BVAnd(List(BVNot(curExpr),low))))
+
+      // BVIte(curExpr,high,low)
     }
   }
 
@@ -99,34 +118,56 @@ object Buchi2TransitionSystem {
 
   def getDBA(retr:os.CommandResult): hoaParser = 
   {
-    //  println("---")           
-    //  println(retr.out.string)
-    //  println("---")
 
-      val is = new ByteArrayInputStream(retr.out.string().getBytes())
-      // 转 BufferedInputStream
-      val bis = new BufferedInputStream(is)    
-      // 打印
-      //Stream.continually(bis.read()).takeWhile(_ != -1).foreach(println(_))
-      val h = new hoaParser()
-      HOAFParser.parseHOA(bis,h)    
-      bis.close()
-      is.close()
+    val is = new ByteArrayInputStream(retr.out.string().getBytes())
+    // 转 BufferedInputStream
+    val bis = new BufferedInputStream(is)    
+    // 打印
+    //Stream.continually(bis.read()).takeWhile(_ != -1).foreach(println(_))
+    val h = new hoaParser()
+    HOAFParser.parseHOA(bis,h)    
+    bis.close()
+    is.close()
       
-    //  println("//////////////////////////")
-    //  println(h.transitionFunc)
-      h.partialDeterministic()
-    //  println("//////////////////////////")
-    //  println(h.transitionFunc)
-      h.addAuxVar()
-      h
+    // println(s"before deter: ${h.transitionFunc}")
+    
+    // distinguish the intersection of the guard
+    h.old_partialDeterministic()
+    
+    println(s"deter: ${h.transitionFunc}")
+    
+    h.old_addAuxVar()
+    h
   }
 
-  def psl2TransitionSystem(h:hoaParser, p2target:Map[String,Target], extraInputNum:Int, BAStateNum:Int, accSignalNum:Int, circuit:Circuit, resetTarget:Target, svastmt:svaStmt):Tuple3[Seq[BVSymbol], State, Signal] = 
+  def assumeAvai(retr:os.CommandResult): Option[hoaParser] = 
+  {
+    val is = new ByteArrayInputStream(retr.out.string().getBytes())
+    // 转 BufferedInputStream
+    val bis = new BufferedInputStream(is)    
+    // 打印
+    //Stream.continually(bis.read()).takeWhile(_ != -1).foreach(println(_))
+    val h = new hoaParser()
+    HOAFParser.parseHOA(bis,h)    
+    bis.close()
+    is.close()
+
+    if(h.old_partialDeterministic())
+      Some(h)
+    else
+      None
+    // if h.badAccs && 
+  }
+
+  def psl2TransitionSystem(h:hoaParser, p2target:Map[String,Target], extraInputNum:Int, BAStateNum:Int, accSignalNum:Int, circuit:Circuit, resetTarget:Target, chastmt:chaStmt, optiEn:Boolean = false):Tuple3[Seq[BVSymbol], State, Signal] = 
   {
     println(s"BAAccept: ${h.accStates}")
-    val baState = BVSymbol("baState" + BAStateNum + "_", h.stateBits)
-
+    val baState = 
+      if(chastmt == chaAssertStmt)
+        BVSymbol("assertSta" + BAStateNum + "_", h.stateBits)
+      else
+        BVSymbol("assumeSta" + BAStateNum + "_", h.stateBits)
+      
     val extraInput:Seq[BVSymbol] = (extraInputNum until (extraInputNum + h.auxVarNum)).toSeq.map{case i: Int => BVSymbol("extInput"+i,1)}
     // extraInputNum = extraInputNum + h.auxVarNum
     val trans_ = h.transitionFunc
@@ -161,32 +202,48 @@ object Buchi2TransitionSystem {
     val r = h.badAccs()
     // println(s"badAccs: $r")
 
-    // if all accepting states are bad states, liveness to safety is not necessary
-    val accSignal = if (r){
-      if (svastmt == svaAssertStmt)
-        Signal("BAacc" + accSignalNum, acceptExpr, IsBad)
+    val accSignal = if(chastmt == chaAssertStmt)
+    {
+      if(r)
+        Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad)
       else
-        Signal("BAacc" + accSignalNum, acceptExpr, IsConstraint)
-      // svastmt match{
-      //   case svaAssertStmt => Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad) 
-      //   case svaAssumeStmt => Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsConstraint) 
-      // }
-    }
-    else{
-      println(s"this!!!: ${svastmt}")
-      println(s"this!!!: ${svaAssertStmt == svaAssumeStmt}")
-      if (svastmt == svaAssertStmt)
         Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)
+    }
+    else
+    {
+      if(optiEn)
+        Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(acceptExpr))) , IsConstraint)
       else
         Signal("BAacc" + accSignalNum, acceptExpr, IsFair)
+    }
+    
 
-      //Some match-case bug!
-      // svastmt match{
-      //   case svaAssumeStmt => Signal("BAacc" + accSignalNum, acceptExpr, IsFair)  
-      //   case svaAssertStmt => {println(IsJustice); Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)}
-      //   case _ => Signal("BAacc" + accSignalNum, acceptExpr, IsFair) 
-      // }
-    } 
+    // if all accepting states are bad states, liveness to safety is not necessary
+    // val accSignal = if (r){
+    //   if (chastmt == chaAssertStmt)
+    //     Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad)
+    //   else 
+    //     Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsConstraint)
+    //   // chastmt match{
+    //   //   case chaAssertStmt => Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad) 
+    //   //   case chaAssumeStmt => Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsConstraint) 
+    //   // }
+    // }
+    // else{
+    //   println(s"this!!!: ${chastmt}")
+    //   println(s"this!!!: ${chaAssertStmt == chaAssumeStmt}")
+    //   if (chastmt == chaAssertStmt)
+    //     Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)
+    //   else
+    //     Signal("BAacc" + accSignalNum, acceptExpr, IsFair)
+
+    //   //Some match-case bug!
+    //   // chastmt match{
+    //   //   case chaAssumeStmt => Signal("BAacc" + accSignalNum, acceptExpr, IsFair)  
+    //   //   case chaAssertStmt => {println(IsJustice); Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)}
+    //   //   case _ => Signal("BAacc" + accSignalNum, acceptExpr, IsFair) 
+    //   // }
+    // } 
     println(s"accSignal: $accSignal")
     //  println("extraInput")
     //  println(extraInput.toSeq)

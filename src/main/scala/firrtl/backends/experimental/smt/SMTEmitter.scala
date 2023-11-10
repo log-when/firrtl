@@ -16,7 +16,7 @@ private[firrtl] abstract class SMTEmitter private[firrtl] ()
     extends Transform
     with Emitter
     with DependencyAPIMigration {
-  override def prerequisites: Seq[Dependency[Transform]] = Seq(Dependency(EncodeSVA))
+  override def prerequisites: Seq[Dependency[Transform]] = Seq(Dependency(EncodeCHA))
   override def invalidates(a: Transform): Boolean = false
 
   override def emit(state: CircuitState, writer: Writer): Unit = error("Deprecated since firrtl 1.0!")
