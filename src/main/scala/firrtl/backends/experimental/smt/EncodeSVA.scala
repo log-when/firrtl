@@ -120,9 +120,6 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
   }
   // sys: original transition system, extraInputNum: 
   private def encodeProps(sysWithCHA:TransitionSystem, accSignals:mutable.Seq[Signal], resetSignals:Seq[BVExpr]): TransitionSystem={
-
-    println(s"accSignals: $accSignals")
-    
     val just2BadStatesMap:Seq[Tuple2[State,State]] = sysWithCHA.states.filter
     {
       case s:State =>
@@ -148,7 +145,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
     
     // if all properties are safety properties, don't execute L2S 
     val noLive = accSignals.filter(x => x.lbl == IsJustice | x.lbl == IsFair).isEmpty
-    println(s"noLive: $noLive")
+    // println(s"noLive: $noLive")
     var auxJust2BadStates = if (noLive) mutable.Seq[State]() else just2BadStatesMap.map{_._2}.toSeq
     var safeSignals:mutable.Seq[Signal] = mutable.Seq[Signal]()
     // var auxSignals::mutable.Seq[Signal] = mutable.Seq[Signal]()
@@ -192,7 +189,6 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
        safeSignals = safeSignals :+ resultSignal
       } 
     }
-    println(s"safeSignal: ${safeSignals}")
     sysWithCHA.copy(sysWithCHA.name,sysWithCHA.inputs,sysWithCHA.states:::auxJust2BadStates.toList,sysWithCHA.signals:::safeSignals.toList:::constraintSignals.toList,sysWithCHA.comments,sysWithCHA.header)
   }
 
@@ -216,7 +212,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
 
       val pslsWithMap : Seq[Tuple4[String, Map[String,Target], Target, chaStmt]] = chaAnnos.collect{
       // val pslsWithMap : Seq[Tuple2[String, Map[String,Target]]] = chaAnnos.collect{
-        case s: chaAnno => {println(s"chaAnno: ${chaAnno}"); chaAnno.CHAAnno2PSL(s)} 
+        case s: chaAnno => {chaAnno.CHAAnno2PSL(s)} 
       }
 
       var extraInputNum: Int = 0
@@ -236,11 +232,9 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
         }
       }
 
-      println(s"resetSignals: ${resetSignals}")
+      // println(s"resetSignals: ${resetSignals}")
       val addAssumeToTransitionSystems: Unit = pslsWithMap.collect{
-        //case object doesn't work here
         case t: Tuple4[String, Map[String,Target], Target, chaStmt] if t._4 == chaAssumeStmt => 
-        // case t: Tuple2[String, Map[String,Target],Target] => 
         {
           // add optimization: if assume(p) refers to a safety property and 
           // the negation of Gp corresponds to a deterministic automat, 
@@ -249,11 +243,10 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
           val isSafetyRes :os.CommandResult = os.proc(isSafetyCmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
           // val isSafety = 
           val isSafety = !isSafetyRes.out.string.isEmpty
-          println(s"isSafety: ${isSafety}")
-          println(s"chaAssumeStmt: ${t._1}, ${t._4}")
+          // println(s"isSafety: ${isSafety}")
 
           val negAssumeFormular = "!" + {t._1}
-          println(s"negAssumeFormular: ${negAssumeFormular}")
+          // println(s"negAssumeFormular: ${negAssumeFormular}")
           val optiCmd = Seq("ltl2tgba","-B","-D", "-f", negAssumeFormular)
           val optRetr:os.CommandResult = os.proc(optiCmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
           val optiAvai = Buchi2TransitionSystem.assumeAvai(optRetr)
@@ -266,8 +259,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
               (false,Buchi2TransitionSystem.getDBA(retr))
             }
           }
-          println(s"optiEn:$optiEn")
-          // val dba = Buchi2TransitionSystem.getDBA(retr)
+          // println(s"optiEn:$optiEn")
           val ret = Buchi2TransitionSystem.psl2TransitionSystem(dba, t._2, extraInputNum, baStateNum, accSignalNum, circuit, t._3, t._4, optiEn)
           extraInputs ++= ret._1
           baStates :+= ret._2
@@ -280,9 +272,8 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
 
       val addAssertToTransitionSystems: Unit = pslsWithMap.collect{
         case t: Tuple4[String, Map[String,Target], Target, chaStmt] if t._4 == chaAssertStmt => 
-        // case t: Tuple2[String, Map[String,Target],Target] => 
         {
-          println(s"chaAssertStmt: ${t._1}")
+          // println(s"chaAssertStmt: ${t._1}")
           val cmd = Seq("ltl2tgba","-B","-D", "-f", t._1)
           val retr:os.CommandResult = os.proc(cmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
           

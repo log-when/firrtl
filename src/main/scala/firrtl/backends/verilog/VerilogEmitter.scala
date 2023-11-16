@@ -475,7 +475,6 @@ class VerilogEmitter extends SeqTransform with Emitter {
     private val chaEmissionOption = 
     {
       val cha :Seq[chaAnno] = annotations.toSeq.filter{_.isInstanceOf[chaAnno]}.map{_.asInstanceOf[chaAnno]}
-      // println(s"cha: $cha")
       cha
     }
     def getCHAEmissionOption(): Seq[chaAnno] = chaEmissionOption
@@ -1059,7 +1058,6 @@ class VerilogEmitter extends SeqTransform with Emitter {
         case sx: Print =>
           simulate(sx.clk, sx.en, printf(sx.string, sx.args), Some("PRINTF_COND"), sx.info)
         case sx: Verification =>  
-          // println(s"original assert: ${sx.pred}")
           addFormal(sx.clk, sx.en, formalStatement(sx.op, sx.pred), sx.info, sx.msg)
         // If we are emitting an Attach, it must not have been removable in VerilogPrep
         case sx: Attach =>
@@ -1239,12 +1237,10 @@ class VerilogEmitter extends SeqTransform with Emitter {
       }
 
       val totalCHA = emissionOptions.getCHAEmissionOption()
-      println(s"totalCHA: $totalCHA")
       val modWithCHA = totalCHA.collect{
         case s : chaAssumeAnno => Map(getModule(s) -> Seq(s))
         case s : chaAssertAnno => Map(getModule(s) -> Seq(s))
       }
-      println(s"modWithCHA: $modWithCHA")
       val modToCHA = mutable.Map[ModuleTarget, Seq[chaAnno]]()
       modWithCHA.foldLeft(modToCHA){
         case (modToCHA,m) => 
@@ -1254,14 +1250,10 @@ class VerilogEmitter extends SeqTransform with Emitter {
           modToCHA
         }
       }
-      println(s"modToCHA: $modToCHA")
+      // println(s"modToCHA: $modToCHA")
       val currentCHAs = modToCHA.get(moduleTarget).getOrElse(Seq())
       // println(s"currentCHAs: $currentCHAs")
       currentCHAs.foreach(addCHAToFormal(formals,_))
-      // println(moduleTarget)
-      // println(s"chaEm: $totalCHA")
-      // formals
-      // addFormal
     }
 
     def emit_streams(): Unit = {
@@ -1436,17 +1428,15 @@ class VerilogEmitter extends SeqTransform with Emitter {
   def transforms = new TransformManager(firrtl.stage.Forms.VerilogOptimized, prerequisites).flattenedTransformOrder
 
   def emit(state: CircuitState, writer: Writer): Unit = {
-    // println(s"transforms: ${this.transforms.toSeq}")
-    // println(s"before transformation: ${state.circuit}")
-    println(s"before transformation: ${state.circuit.serialize}")
+
+    // println(s"before transformation: ${state.circuit.serialize}")
     val cs = runTransforms(state)
     
     val state_cha = state.annotations.toSeq.collect{
       case x:chaAnno => x
     }
-    println(s"state_cha: ${state_cha}")
+    // println(s"state_cha: ${state_cha}")
     
-    // println(s"transformation: ${state.annotations.toSeq}")
 
     val state_chaTargets = state.annotations.toSeq.collect{
       case x:chaAnno => x
@@ -1459,18 +1449,16 @@ class VerilogEmitter extends SeqTransform with Emitter {
       case x : EnableAnno => x.target.getComplete.get.asInstanceOf[ReferenceTarget]
     }
 
-    state_chaTargets.foreach
-    {
-      state_chaTargets =>
-      println(s"circuit1: ${Target.getReferenceTarget(state_chaTargets).circuit}")
-      println(s"module1: ${state_chaTargets.asInstanceOf[ReferenceTarget].module}")
-      println(s"path1: ${Target.getReferenceTarget(state_chaTargets).asInstanceOf[ReferenceTarget].path}")
-      println(s"ref1: ${Target.getReferenceTarget(state_chaTargets).asInstanceOf[ReferenceTarget].ref}")
-      println(s"component1: ${Target.getReferenceTarget(state_chaTargets).asInstanceOf[ReferenceTarget].component}")
-    }
-    println(s"state_chaTargets: ${state_chaTargets}")
-
-    // println(s"after transformation: ${cs.circuit.serialize}")
+    // state_chaTargets.foreach
+    // {
+    //   state_chaTargets =>
+    //   println(s"circuit1: ${Target.getReferenceTarget(state_chaTargets).circuit}")
+    //   println(s"module1: ${state_chaTargets.asInstanceOf[ReferenceTarget].module}")
+    //   println(s"path1: ${Target.getReferenceTarget(state_chaTargets).asInstanceOf[ReferenceTarget].path}")
+    //   println(s"ref1: ${Target.getReferenceTarget(state_chaTargets).asInstanceOf[ReferenceTarget].ref}")
+    //   println(s"component1: ${Target.getReferenceTarget(state_chaTargets).asInstanceOf[ReferenceTarget].component}")
+    // }
+    
     val irLookup = IRLookup(cs.circuit)
 
     val chaTargets = cs.annotations.toSeq.collect{
@@ -1484,16 +1472,8 @@ class VerilogEmitter extends SeqTransform with Emitter {
       case x : EnableAnno => x.target
     }
     
-    println(s"chaTargets: $chaTargets")
-    // val thisExpr = irLookup.expr(t._3.asInstanceOf[ReferenceTarget])
     val target2Expr = chaTargets.map(t => t -> 
       {
-        // println(s"target: ${t.serialize}")
-        // println(s"circuit: ${t.asInstanceOf[ReferenceTarget].circuit}")
-        // println(s"module: ${t.asInstanceOf[ReferenceTarget].module}")
-        // println(s"path: ${t.asInstanceOf[ReferenceTarget].path}")
-        // println(s"ref: ${t.asInstanceOf[ReferenceTarget].ref}")
-        // println(s"component: ${t.asInstanceOf[ReferenceTarget].component}")
         irLookup.expr(t.asInstanceOf[ReferenceTarget])
       }).toMap
     
@@ -1513,7 +1493,6 @@ class VerilogEmitter extends SeqTransform with Emitter {
   }
 
   override def execute(state: CircuitState): CircuitState = {
-    // println(s"why?  ${state.circuit}")
     val writerToString =
       (writer: java.io.StringWriter) => writer.toString.replaceAll("""(?m) +$""", "") // trim trailing whitespace
 

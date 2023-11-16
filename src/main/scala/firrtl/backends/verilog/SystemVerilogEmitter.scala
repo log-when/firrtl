@@ -18,14 +18,11 @@ class SystemVerilogEmitter extends VerilogEmitter {
     info:    Info,
     msg:     StringLit
   ): Unit = {
-    println(en);
-    println(stmt);
     val lines = formals.getOrElseUpdate(clk, ArrayBuffer[Seq[Any]]())
     lines += Seq("// ", msg.serialize)
     lines += Seq("if (", en, ") begin")
     lines += Seq(tab, stmt, info)
     lines += Seq("end")
-    println(s"lines: $lines")
   }
 
   override def execute(state: CircuitState): CircuitState = {

@@ -38,7 +38,6 @@ object Buchi2TransitionSystem {
 
   def genTotalIte(baState:BVSymbol, bvs:mutable.Map[Int,mutable.Seq[Tuple2[BVExpr,BVExpr]]], defau: BVExpr, stateBits:Int): BVExpr =
   {
-//  println(s"remaining: ${bvs.size}")
     if(bvs.isEmpty)
     {
       defau
@@ -47,8 +46,6 @@ object Buchi2TransitionSystem {
     {
       val ffirst = bvs.head
       val remaining = bvs - (ffirst._1)
-      //  println(ffirst._2)
-      //  println(genIte(ffirst._2, defau))
       BVIte(BVEqual(baState, BVLiteral(BigInt(ffirst._1), stateBits)), genIte(ffirst._2, defau), genTotalIte(baState, remaining, defau, stateBits))
     }
   }
@@ -120,21 +117,16 @@ object Buchi2TransitionSystem {
   {
 
     val is = new ByteArrayInputStream(retr.out.string().getBytes())
-    // 转 BufferedInputStream
     val bis = new BufferedInputStream(is)    
-    // 打印
-    //Stream.continually(bis.read()).takeWhile(_ != -1).foreach(println(_))
     val h = new hoaParser()
     HOAFParser.parseHOA(bis,h)    
     bis.close()
     is.close()
       
     // println(s"before deter: ${h.transitionFunc}")
-    
     // distinguish the intersection of the guard
     h.old_partialDeterministic()
-    
-    println(s"deter: ${h.transitionFunc}")
+    // println(s"deter: ${h.transitionFunc}")
     
     h.old_addAuxVar()
     h
@@ -143,10 +135,7 @@ object Buchi2TransitionSystem {
   def assumeAvai(retr:os.CommandResult): Option[hoaParser] = 
   {
     val is = new ByteArrayInputStream(retr.out.string().getBytes())
-    // 转 BufferedInputStream
     val bis = new BufferedInputStream(is)    
-    // 打印
-    //Stream.continually(bis.read()).takeWhile(_ != -1).foreach(println(_))
     val h = new hoaParser()
     HOAFParser.parseHOA(bis,h)    
     bis.close()
@@ -161,7 +150,7 @@ object Buchi2TransitionSystem {
 
   def psl2TransitionSystem(h:hoaParser, p2target:Map[String,Target], extraInputNum:Int, BAStateNum:Int, accSignalNum:Int, circuit:Circuit, resetTarget:Target, chastmt:chaStmt, optiEn:Boolean = false):Tuple3[Seq[BVSymbol], State, Signal] = 
   {
-    println(s"BAAccept: ${h.accStates}")
+    // println(s"BAAccept: ${h.accStates}")
     val baState = 
       if(chastmt == chaAssertStmt)
         BVSymbol("assertSta" + BAStateNum + "_", h.stateBits)
@@ -178,12 +167,9 @@ object Buchi2TransitionSystem {
       var TransSeq: mutable.Seq[Tuple2[BVExpr,BVExpr]] = mutable.Seq[Tuple2[BVExpr,BVExpr]]()
       for((k,v) <- trans_(i))
       {
-      //  println(s"k:  $k")
         val cond = bddToSMTExpr(h.apNum, k, h.int2Ap, p2target, circuit, extraInput)
-        //val cond:BVExpr = BVAnd( BVEqual(baState, BVLiteral(BigInt(i),h.stateBits)), bddToSMTExpr(h.apNum, k, h.int2Ap, p2target, circuit, extraInput) ) 
         val defa:BVExpr = BVLiteral(BigInt(v.head),h.stateBits)
         TransSeq :+= Tuple2(cond, defa)
-        //println(ttemp_)
       }
       totalTransSeq += (i -> TransSeq)
     }
@@ -196,7 +182,6 @@ object Buchi2TransitionSystem {
     val baState_ = State(baState, None, Some(baStateNext))
 
     val BAAccept = h.accStates
-    println(s"BAAccept: $BAAccept")
     val acceptExpr = genAcc(baState, BAAccept, h.stateBits)
     
     val r = h.badAccs()
@@ -217,7 +202,7 @@ object Buchi2TransitionSystem {
         Signal("BAacc" + accSignalNum, acceptExpr, IsFair)
     }
     
-
+    Tuple3(extraInput, baState_, accSignal)
     // if all accepting states are bad states, liveness to safety is not necessary
     // val accSignal = if (r){
     //   if (chastmt == chaAssertStmt)
@@ -244,9 +229,9 @@ object Buchi2TransitionSystem {
     //   //   case _ => Signal("BAacc" + accSignalNum, acceptExpr, IsFair) 
     //   // }
     // } 
-    println(s"accSignal: $accSignal")
+    // println(s"accSignal: $accSignal")
     //  println("extraInput")
     //  println(extraInput.toSeq)
-    Tuple3(extraInput, baState_, accSignal)
+    
   }
 }
