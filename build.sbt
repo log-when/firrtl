@@ -3,7 +3,7 @@
 enablePlugins(SiteScaladocPlugin)
 
 lazy val commonSettings = Seq(
-  organization := "edu.berkeley.cs",
+  organization := "cn.ac.ios.tis",
   scalaVersion := "2.13.10",
   crossScalaVersions := Seq("2.13.10", "2.12.17")
 )
@@ -14,7 +14,7 @@ lazy val isAtLeastScala213 = Def.setting {
 }
 
 val defaultVersions = Map(
-  "chiseltest" -> "edu.berkeley.cs" %% "chiseltest" %"0.7-SNAPSHOT"
+  "chiseltest" -> "cn.ac.ios.tis" %% "chiseltest" % "0.7-SNAPSHOT"
 )
 lazy val chiseltestRef = ProjectRef(file("../chiseltest") , "chiseltest")
 
