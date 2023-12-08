@@ -141,7 +141,7 @@ object Buchi2TransitionSystem {
     bis.close()
     is.close()
 
-    if(h.old_partialDeterministic())
+    if(h.old_partialDeterministic() && h.badAccs())
       Some(h)
     else
       None

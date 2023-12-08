@@ -96,7 +96,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
 
     assert(accSignal.lbl == IsBad | accSignal.lbl == IsJustice)
     if (accSignal.lbl == IsBad) {
-      Tuple3(accSignal, Seq() ++ auxJust2BadStates, None)
+      Tuple3(accSignal, Seq(), None)
     }
     else {
       val reset = resetSignal
@@ -196,6 +196,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
 
     val circuit = state.circuit
     val sys = state.annotations.filter{_.isInstanceOf[TransitionSystemAnnotation]}.head.asInstanceOf[TransitionSystemAnnotation].sys
+    val enSafetyAssume = state.annotations.contains{EnSafetyOpti}
 
     val chaAsserts : AnnotationSeq = state.annotations.filter {_.isInstanceOf[chaAssertAnno]}
     //println(s"chaAnnos: ($chaAnnos).toSeq")
@@ -218,7 +219,10 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
       var extraInputNum: Int = 0
       var extraInputs:mutable.Seq[BVSymbol] = mutable.Seq[BVSymbol]()
       var baStateNum:Int = 0
-      var baStates:mutable.Seq[State] = mutable.Seq[State]()
+      // store other states 
+      var baStates1:mutable.Seq[State] = mutable.Seq[State]()
+      // store "safety" assumption -> Buchi automata states, which are not copied during L2S 
+      var baStates2:mutable.Seq[State] = mutable.Seq[State]()
       var accSignalNum:Int = 0
       var accSignals:mutable.Seq[Signal] = mutable.Seq[Signal]()
 
@@ -242,7 +246,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
           val isSafetyCmd = Seq("ltlfilt","-f",t._1,"--safety") 
           val isSafetyRes :os.CommandResult = os.proc(isSafetyCmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
           // val isSafety = 
-          val isSafety = !isSafetyRes.out.string().isEmpty
+          val isSafety = !isSafetyRes.out.string().isEmpty && enSafetyAssume
           // println(s"isSafety: ${isSafety}")
 
           val negAssumeFormular = "!" + {t._1}
@@ -252,7 +256,15 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
           val optiAvai = Buchi2TransitionSystem.assumeAvai(optRetr)
           val (optiEn, dba) = 
           optiAvai match{
-            case Some(h) => Tuple2(true, h)
+            case Some(h) => {
+              if(isSafety)
+                (true, h)
+              else{
+                val cmd = Seq("ltl2tgba","-B","-D", "-f", t._1)
+                val retr:os.CommandResult = os.proc(cmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
+                (false,Buchi2TransitionSystem.getDBA(retr))
+              }
+            }
             case None => {
               val cmd = Seq("ltl2tgba","-B","-D", "-f", t._1)
               val retr:os.CommandResult = os.proc(cmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
@@ -262,7 +274,10 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
           // println(s"optiEn:$optiEn")
           val ret = Buchi2TransitionSystem.psl2TransitionSystem(dba, t._2, extraInputNum, baStateNum, accSignalNum, circuit, t._3, t._4, optiEn)
           extraInputs ++= ret._1
-          baStates :+= ret._2
+          if(optiEn)
+            baStates2 :+= ret._2
+          else
+            baStates1 :+= ret._2
           accSignals :+= ret._3
           extraInputNum += dba.auxVarNum
           baStateNum += 1
@@ -280,7 +295,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
           val dba = Buchi2TransitionSystem.getDBA(retr)
           val ret = Buchi2TransitionSystem.psl2TransitionSystem(dba, t._2, extraInputNum, baStateNum, accSignalNum, circuit, t._3, t._4)
           extraInputs ++= ret._1
-          baStates :+= ret._2
+          baStates1 :+= ret._2
           accSignals :+= ret._3
           extraInputNum += dba.auxVarNum
           baStateNum += 1
@@ -288,9 +303,10 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
         }
       }
 
-      val sysWithCHA = sys.copy(sys.name,sys.inputs:::extraInputs.toList,sys.states:::baStates.toList, sys.signals,sys.comments,sys.header)
-      val sysJust2Bad = encodeProps(sysWithCHA, accSignals, resetSignals)
-      TopologicalSort.run(sysJust2Bad)
+      val sysWithoutSafetyAssume = sys.copy(sys.name,sys.inputs:::extraInputs.toList,sys.states:::baStates1.toList, sys.signals,sys.comments,sys.header)
+      val sysJust2Bad = encodeProps(sysWithoutSafetyAssume, accSignals, resetSignals)
+      val sysWithCHA = sysJust2Bad.copy(sysJust2Bad.name, sysJust2Bad.inputs, sysJust2Bad.states:::baStates2.toList, sysJust2Bad.signals, sysJust2Bad.comments, sysJust2Bad.header)
+      TopologicalSort.run(sysWithCHA)
     }
     else
     {
