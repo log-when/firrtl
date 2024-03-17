@@ -24,18 +24,21 @@ import javax.lang.model.`type`.ReferenceType
 
 object Buchi2TransitionSystem {
 
+  // Input: Seq((cond, branch)), default value; 
+  // output: ite(cond1, branch1, ite(cond2, branch2, ... (cond_n, branch_n, default)))
   def genIte(bvs:mutable.Seq[Tuple2[BVExpr,BVExpr]], defau: BVExpr): BVExpr =
-    {
-        if(bvs.isEmpty)
-        {
-            defau
-        }
-        else
-        {
-            BVIte(bvs(0)._1, bvs(0)._2, genIte(bvs.slice(1,bvs.size), defau))
-        }
-    }
+  {
+      if(bvs.isEmpty)
+      {
+          defau
+      }
+      else
+      {
+          BVIte(bvs(0)._1, bvs(0)._2, genIte(bvs.slice(1,bvs.size), defau))
+      }
+  }
 
+  // Given a state var and its trans relation(bvs), generate the smt expr
   def genTotalIte(baState:BVSymbol, bvs:mutable.Map[Int,mutable.Seq[Tuple2[BVExpr,BVExpr]]], defau: BVExpr, stateBits:Int): BVExpr =
   {
     if(bvs.isEmpty)
@@ -101,6 +104,7 @@ object Buchi2TransitionSystem {
     }
   }
 
+  // Merge the accepting states of BA into one
   def genAcc(baState:BVSymbol, accepts:Seq[Int], stateBits:Int): BVExpr =
   {
     if(accepts.size == 1)
@@ -115,7 +119,6 @@ object Buchi2TransitionSystem {
 
   def getDBA(retr:os.CommandResult): hoaParser = 
   {
-
     val is = new ByteArrayInputStream(retr.out.string().getBytes())
     val bis = new BufferedInputStream(is)    
     val h = new hoaParser()
@@ -127,12 +130,11 @@ object Buchi2TransitionSystem {
     // distinguish the intersection of the guard
     h.old_partialDeterministic()
     // println(s"deter: ${h.transitionFunc}")
-    
     h.old_addAuxVar()
     h
   }
 
-  def assumeAvai(retr:os.CommandResult): Option[hoaParser] = 
+  def safeAssumeAsConst(retr:os.CommandResult): Option[hoaParser] = 
   {
     val is = new ByteArrayInputStream(retr.out.string().getBytes())
     val bis = new BufferedInputStream(is)    
@@ -145,7 +147,6 @@ object Buchi2TransitionSystem {
       Some(h)
     else
       None
-    // if h.badAccs && 
   }
 
   def psl2TransitionSystem(h:hoaParser, p2target:Map[String,Target], extraInputNum:Int, BAStateNum:Int, accSignalNum:Int, circuit:Circuit, resetTarget:Target, chastmt:chaStmt, optiEn:Boolean = false):Tuple3[Seq[BVSymbol], State, Signal] = 
@@ -186,16 +187,17 @@ object Buchi2TransitionSystem {
     
     val r = h.badAccs()
     // println(s"badAccs: $r")
-
+    // println(s"optiEn2: $optiEn")
     val accSignal = if(chastmt == chaAssertStmt)
     {
-      if(r)
+      if(r && optiEn)
         Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad)
       else
         Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)
     }
     else
     {
+      // println(s"optiEn: $optiEn")
       if(optiEn)
         Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(acceptExpr))) , IsConstraint)
       else
