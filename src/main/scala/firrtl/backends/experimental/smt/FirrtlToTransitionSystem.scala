@@ -44,12 +44,9 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
     val circuit = state.circuit
 
     // println(circuit)
-    // println("****************")
     val presetRegs = state.annotations.collect {
       case PresetRegAnnotation(target) if target.module == circuit.main => target.ref
     }.toSet
-    /*println("presetRegs:")
-    println(presetRegs)*/
 
     // in counter, no memory, no non-random memory
     // collect all non-random memory initialization
@@ -119,10 +116,6 @@ private class ModuleToTransitionSystem(
     extends LazyLogging {
 
   def run(m: ir.Module): TransitionSystem = {
-    // println(m)
-    // println(chaanno)
-    // val irLookup = IRLookup(circuit)
-    // signals.append(Signal("chaBad", e = onExpression(chaExpr(0)), lbl = IsBad))
 
     // first pass over the module to convert expressions; discover state and I/O
     m.foreachPort(onPort)
@@ -170,11 +163,6 @@ private class ModuleToTransitionSystem(
         if (isClock(p.tpe)) {
           clocks.append(p.name)
         } else {
-          // println(s"port: ${p}")
-          // val temp1:SMTExpr = new BVLiteral(BigInt(1),1)
-          // val temp2:SMTExpr = new BVLiteral(BigInt(0),1)
-          // states(p.name) = State(BVSymbol(p.name,1),Some(temp1),Some(temp2))
-
           inputs.append(BVSymbol(p.name, bitWidth(p.tpe).toInt))
         }
       case ir.Output =>
@@ -196,24 +184,20 @@ private class ModuleToTransitionSystem(
     case ir.DefNode(info, name, expr) =>
       if (!isClock(expr.tpe) && !isAsyncReset(expr.tpe)) {
         infos.append(name -> info)
-        // println(name)
-        // many intermediate nodes are generated in firrt transform ?
         signals.append(Signal(name, onExpression(expr), IsNode))
       }
     case r: ir.DefRegister =>
-      // println(r)
       infos.append(r.name -> r.info)
-      // why not states(r.names) = states(r.names).copy(init = ...) ?
       states(r.name) = onRegister(r)
     case m: ir.DefMemory =>
-      // println(m)
       infos.append(m.name -> m.info)
+      // val memSplitedStates = onMemory(m, true)
+      // for(i <- memSplitedStates)
+      // {
+      //   states(i._1) = i._2
+      // }
       states(m.name) = onMemory(m)
     case ir.Connect(info, loc, expr) =>
-      // get it !
-       /*println(loc)
-       println(expr)
-       println("------")*/
       if (!isGroundType(loc.tpe)) error("All connects should have been lowered to ground type!")
       if (!isClock(loc.tpe) && !isAsyncReset(expr.tpe)) { // we ignore clock connections
         val name = loc.serialize
@@ -223,12 +207,12 @@ private class ModuleToTransitionSystem(
           // I don't understand... Because submodules have been flattened, we don't need to consider submodule ?
           // But why IsOutput ?
           case PortKind | InstanceKind => // module output or submodule input
-            // println(loc)
             infos.append(name -> info)
             signals.append(Signal(name, e, IsOutput))
           case MemKind | WireKind =>
             // Consider memory later
             // InlineInstances can insert wires without re-running RemoveWires for now we just deal with it.
+            // println(s"mem connect, name: ${name}, expr:${e}")
             infos.append(name -> info)
             signals.append(Signal(name, e, IsNode))
         }
@@ -344,46 +328,206 @@ private class ModuleToTransitionSystem(
     }
   }
 
-  private def onMemory(m: ir.DefMemory): State = {
+  private def onMemory(m: ir.DefMemory, memSplited: Boolean): Map[String, State] = {
+    
+    // --- noted by yusz: use bv to encode mem instead of array
+    // try vector-blasting
+    // --- notes ends
     checkMem(m)
 
     // derive the type of the memory from the dataType and depth
+    // --- modified by yusz: original codes are in the else branch
     val dataWidth = bitWidth(m.dataType).toInt
     val indexWidth = Utils.getUIntWidth(m.depth - 1).max(1)
-    val memSymbol = ArraySymbol(m.name, indexWidth, dataWidth)
+    val indexRange = scala.math.pow(2,indexWidth).toInt
+    
+    val memSplitedStates = (0 until indexRange).toSeq.map
+    {
+      x:Int =>
+      {
+        val memSymbol = BVSymbol(m.name + "_" + x.toString(), dataWidth)
+        val init = None
+        val next = if (m.writers.isEmpty) {
+          memSymbol
+        } 
+        else {
+          m.writers.foldLeft[BVExpr](memSymbol) 
+          {
+            case (prev, write) =>
+              // update
+              val addr = BVSymbol(memPortField(m, write, "addr").serialize, indexWidth)
+              val data = BVSymbol(memPortField(m, write, "data").serialize, dataWidth)
 
-    // there could be a constant init
-    val init = memInit.get(m.name).map(getMemInit(m, indexWidth, dataWidth, _))
-    init.foreach(e => assert(e.dataWidth == memSymbol.dataWidth && e.indexWidth == memSymbol.indexWidth))
-
-    // derive next state expression
-    val next = if (m.writers.isEmpty) {
-      memSymbol
-    } else {
-      m.writers.foldLeft[ArrayExpr](memSymbol) {
-        case (prev, write) =>
-          // update
-          val addr = BVSymbol(memPortField(m, write, "addr").serialize, indexWidth)
-          val data = BVSymbol(memPortField(m, write, "data").serialize, dataWidth)
-          val update = ArrayStore(prev, index = addr, data = data)
-
-          // update guard
-          val en = BVSymbol(memPortField(m, write, "en").serialize, 1)
-          val mask = BVSymbol(memPortField(m, write, "mask").serialize, 1)
-          ArrayIte(BVAnd(en, mask), update, prev)
+              val update = BVIte(BVEqual(addr,BVLiteral(BigInt(x),indexWidth)), data, prev)
+              // update guard
+              val en = BVSymbol(memPortField(m, write, "en").serialize, 1)
+              val mask = BVSymbol(memPortField(m, write, "mask").serialize, 1)
+              BVIte(BVAnd(en, mask), update, prev)
+          }
+        }
+        val state = State(memSymbol, init, Some(next))
+        (m.name + x.toString(), state)
       }
     }
 
-    val state = State(memSymbol, init, Some(next))
-
     // derive read expressions
-    val readSignals = m.readers.map { read =>
-      val addr = BVSymbol(memPortField(m, read, "addr").serialize, indexWidth)
-      Signal(memPortField(m, read, "data").serialize, ArrayRead(memSymbol, addr), IsNode)
+    val readSignals = m.readers.map { 
+      read =>
+        val addr = BVSymbol(memPortField(m, read, "addr").serialize, indexWidth)
+        val addrWithSliceBV = (0 until scala.math.pow(2,indexWidth).toInt).toSeq.map
+        {
+          x:Int =>
+          {
+            val sliceBV = BVSymbol(m.name + "_" + x.toString(), dataWidth)
+            Tuple2(BVEqual(addr,BVLiteral(BigInt(x),indexWidth)), sliceBV)
+          }     
+        }
+        val result = addrWithSliceBV.tail.foldLeft[BVExpr](addrWithSliceBV.head._2){
+          case (orig, Tuple2(cond, branch)) =>
+          {
+            BVIte(cond, branch, orig)
+          }
+        }
+        Signal(memPortField(m, read, "data").serialize, result, IsNode)
     }
     signals ++= readSignals
+    memSplitedStates.toMap
+  }
 
-    state
+  private def onMemory(m: ir.DefMemory): State = {
+    
+    checkMem(m)
+    // --- noted by yusz: use bv to encode mem instead of array
+    // 1.mem init 2.mem update 3.mem read
+    // access value dynamically? by enumaration? 
+    // multi-write-port?
+    // it seems that vector-blasting is better than regarding the whole array as a large vector ???
+    // --- notes ends
+
+    // derive the type of the memory from the dataType and depth
+    if(false)
+    {
+      // --- modified by yusz: original codes are in the else branch
+      val dataWidth = bitWidth(m.dataType).toInt
+      val indexWidth = Utils.getUIntWidth(m.depth - 1).max(1)
+      val flattenWidth = scala.math.pow(2,indexWidth).toInt * dataWidth
+      val flattenMemSymbol = BVSymbol(m.name, flattenWidth)
+
+      val init = None
+      val next = if (m.writers.isEmpty) {
+        flattenMemSymbol
+      } else {
+        m.writers.foldLeft[BVExpr](flattenMemSymbol) {
+          case (prev, write) =>
+            // update
+            val addr = BVSymbol(memPortField(m, write, "addr").serialize, indexWidth)
+            val data = BVSymbol(memPortField(m, write, "data").serialize, dataWidth)
+            val addrWithSubsBV = (0 until scala.math.pow(2,indexWidth).toInt).toSeq.map
+            {
+              x:Int =>
+              {
+                val headHighIndex = scala.math.pow(2,indexWidth).toInt*dataWidth - 1
+                val headLowIndex = (x+1)*dataWidth
+                val tailHighIndex = x*dataWidth - 1
+                val tailLowIndex = 0
+                
+                if(x == 0)
+                {
+                  val headSlice = BVSlice(prev, headHighIndex, headLowIndex)
+                  val reConcatBV = BVConcat(headSlice, data)
+                  Tuple2(BVEqual(addr,BVLiteral(BigInt(x),indexWidth)), reConcatBV)
+                }
+                else if(x == scala.math.pow(2,indexWidth) - 1)
+                {
+                  val tailSlice = BVSlice(prev, tailHighIndex, tailLowIndex) 
+                  val reConcatBV = BVConcat(data,tailSlice)
+                  Tuple2(BVEqual(addr,BVLiteral(BigInt(x),indexWidth)), reConcatBV)
+                }
+                else
+                {
+                  val headSlice = BVSlice(prev, headHighIndex, headLowIndex)
+                  val tailSlice = BVSlice(prev, tailHighIndex, tailLowIndex)
+                  val reConcatBV = BVConcat(BVConcat(headSlice, data), tailSlice)
+                  Tuple2(BVEqual(addr,BVLiteral(BigInt(x),indexWidth)), reConcatBV)
+                }
+              }     
+            }
+            val update = addrWithSubsBV.foldLeft[BVExpr](prev){
+              case (orig, subs) =>
+              {
+                BVIte(subs._1, subs._2, orig)
+              }
+            }
+            // update guard
+            val en = BVSymbol(memPortField(m, write, "en").serialize, 1)
+            val mask = BVSymbol(memPortField(m, write, "mask").serialize, 1)
+            BVIte(BVAnd(en, mask), update, prev)
+        }
+      }
+      val state = State(flattenMemSymbol, init, Some(next))
+      // derive read expressions
+      val readSignals = m.readers.map { read =>
+        val addr = BVSymbol(memPortField(m, read, "addr").serialize, indexWidth)
+        val addrWithSliceBV = (0 until scala.math.pow(2,indexWidth).toInt).toSeq.map
+        {
+          x:Int =>
+          {
+            val sliceBV = BVSlice(flattenMemSymbol, (x+1)*dataWidth-1, x*dataWidth)
+            Tuple2(BVEqual(addr,BVLiteral(BigInt(x),indexWidth)), sliceBV)
+          }     
+        }
+        val result = addrWithSliceBV.tail.foldLeft[BVExpr](addrWithSliceBV.head._2){
+          case (orig, Tuple2(cond, branch)) =>
+          {
+            BVIte(cond, branch, orig)
+          }
+        }
+        Signal(memPortField(m, read, "data").serialize, result, IsNode)
+      }
+      signals ++= readSignals
+      state
+      // modification ends
+    }
+    else
+    {
+      val dataWidth = bitWidth(m.dataType).toInt
+      val indexWidth = Utils.getUIntWidth(m.depth - 1).max(1)
+      val memSymbol = ArraySymbol(m.name, indexWidth, dataWidth)
+
+      // there could be a constant init
+      val init = memInit.get(m.name).map(getMemInit(m, indexWidth, dataWidth, _))
+      init.foreach(e => assert(e.dataWidth == memSymbol.dataWidth && e.indexWidth == memSymbol.indexWidth))
+
+      // derive next state expression
+      val next = if (m.writers.isEmpty) {
+        memSymbol
+      } else {
+        m.writers.foldLeft[ArrayExpr](memSymbol) {
+          case (prev, write) =>
+            // update
+            val addr = BVSymbol(memPortField(m, write, "addr").serialize, indexWidth)
+            val data = BVSymbol(memPortField(m, write, "data").serialize, dataWidth)
+            val update = ArrayStore(prev, index = addr, data = data)
+
+            // update guard
+            val en = BVSymbol(memPortField(m, write, "en").serialize, 1)
+            val mask = BVSymbol(memPortField(m, write, "mask").serialize, 1)
+            ArrayIte(BVAnd(en, mask), update, prev)
+        }
+      }
+
+      val state = State(memSymbol, init, Some(next))
+
+      // derive read expressions
+      val readSignals = m.readers.map { read =>
+        val addr = BVSymbol(memPortField(m, read, "addr").serialize, indexWidth)
+        Signal(memPortField(m, read, "data").serialize, ArrayRead(memSymbol, addr), IsNode)
+      }
+      signals ++= readSignals
+
+      state
+    }
+    
   }
 
   private def getMemInit(m: ir.DefMemory, indexWidth: Int, dataWidth: Int, initValue: MemoryInitValue): ArrayExpr =
