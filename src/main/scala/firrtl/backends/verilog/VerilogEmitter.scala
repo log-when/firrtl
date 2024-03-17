@@ -1196,9 +1196,9 @@ class VerilogEmitter extends SeqTransform with Emitter {
     {
       def getModule(seqCHA:chaAnno): ModuleTarget =
       {
-        val modAnno = seqCHA.toElementSeq().toSeq.filter(_.isInstanceOf[ModuleAnno])
-        assert(modAnno.size == 1, "one assertion should be only in one module")
-        modAnno(0).asInstanceOf[ModuleAnno].target.asInstanceOf[ModuleTarget]
+        val modAnnos = seqCHA.toElementSeq().toSeq.filter(_.isInstanceOf[ModAnno])
+        assert(modAnnos.size == 1, "one assertion should be only in one module")
+        modAnnos(0).asInstanceOf[ModAnno].target.asInstanceOf[ModuleTarget]
       }
 
       def addCHAToFormal(
