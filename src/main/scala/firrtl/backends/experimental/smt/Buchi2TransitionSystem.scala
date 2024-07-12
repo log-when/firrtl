@@ -1,3 +1,4 @@
+// added in cha: parse Buchi automata, synthesis the transiton system and 
 package firrtl.backends.experimental.smt
 
 import firrtl.annotations.{Target, ReferenceTarget, MemoryInitAnnotation, NoTargetAnnotation, PresetRegAnnotation}

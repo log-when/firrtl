@@ -190,7 +190,8 @@ private class ModuleToTransitionSystem(
       infos.append(r.name -> r.info)
       states(r.name) = onRegister(r)
     case m: ir.DefMemory =>
-      infos.append(m.name -> m.info)
+      // default: disallow bv-blasting
+      // infos.append(m.name -> m.info)
       // val memSplitedStates = onMemory(m, true)
       // for(i <- memSplitedStates)
       // {

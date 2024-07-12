@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Author: Kevin Laeufer <laeufer@cs.berkeley.edu>
+// modified in cha: synchronize the properties with the hardware
 
 package firrtl.backends.experimental.smt
 
