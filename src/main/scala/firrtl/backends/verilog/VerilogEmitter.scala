@@ -1212,6 +1212,8 @@ class VerilogEmitter extends SeqTransform with Emitter {
             Formal.Assert.toString
           else if(chaSeq.isInstanceOf[chaAssumeAnno])
             Formal.Assume.toString
+          else if(chaSeq.isInstanceOf[chaCoverAnno])
+            Formal.Cover.toString
           else
             ""
 

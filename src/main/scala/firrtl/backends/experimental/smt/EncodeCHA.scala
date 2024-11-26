@@ -72,7 +72,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
     triggered
   }
 
-  private def genSafeSignals(just2BadStatesMap: Seq[Tuple2[State,State]], accSignal:Signal, resetSignal:BVExpr, i:Int) : Tuple4[Signal, Seq[State], Option[State], Seq[Signal]] = {
+  private def genSafeSignals(just2BadStatesMap: Seq[Tuple2[State,State]], accSignal:Signal, resetSignal:BVExpr, i:Int, isCover:Boolean = false) : Tuple4[Signal, Seq[State], Option[State], Seq[Signal]] = {
     
     val index = i 
     var safeSignals:mutable.Seq[Signal] = mutable.Seq[Signal]()
@@ -98,7 +98,9 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
     val stateEqual = just2BadStatesMap.filter
     {
       case t:Tuple2[State,State] =>
-        t._1.name.slice(0,8) != "assertSta"  | t._1.name == "assertSta" + index.toString + "_"
+        (isCover || ((t._1.name.slice(0,5) != "atSta" && t._1.name.slice(0,5) != "cvSta") || t._1.name == "atSta" + index.toString + "_")) &&
+        (!isCover || ((t._1.name.slice(0,5) != "atSta" && t._1.name.slice(0,5) != "cvSta") || t._1.name == "cvSta" + index.toString + "_"))
+
     }
     .map{
     case t:Tuple2[State,State] =>
@@ -125,20 +127,21 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
     }
     else {
       val reset = resetSignal
+      val assertType = if(isCover) "cv" else "at" 
 
-      val seenSymbol = BVSymbol("seen"+"_"+index+"_",1)
+      val seenSymbol = BVSymbol(assertType + "Seen"+"_"+index+"_",1)
       val seenNext = BVAnd(List(BVOr(List(correspEqual,seenSymbol)),BVNot(reset)))  
       val seen:State = State(seenSymbol,Some(BVLiteral(BigInt(0),1)),Some(seenNext))
       // val seen:State = State(seenSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVOr(List(correspEqual,seenSymbol))))
       auxJust2BadStates +:= seen
 
-      val triggeredSymbol = BVSymbol("triggered"+"_"+index+"_",1)
+      val triggeredSymbol = BVSymbol(assertType +"Tr"+"_"+index+"_",1)
       val triggerNext = BVAnd(List(BVOr(List(triggeredSymbol,BVAnd(List(accSignal.e.asInstanceOf[BVExpr],seenNext)))),BVNot(reset)))
       // val triggered:State = State(triggeredSymbol,Some(BVLiteral(BigInt(0),1)),Some(BVOr(List(triggeredSymbol,BVAnd(List(accSignal.e.asInstanceOf[BVExpr],seenSymbol))))))
       val triggered:State = State(triggeredSymbol,Some(BVLiteral(BigInt(0),1)),Some(triggerNext))
       auxJust2BadStates +:= triggered
 
-      val loop = Signal("just2Bad" + i + "_", BVAnd(List(triggeredSymbol,correspEqual):+BVNot(reset)) , IsBad)
+      val loop = Signal(assertType + "J2B" + i + "_", BVAnd(List(triggeredSymbol,correspEqual):+BVNot(reset)) , IsBad)
 
       Tuple4(loop, Seq() ++ auxJust2BadStates, Some(seen), stateEqual)
     }
@@ -182,15 +185,16 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
     var constraintSignals = accSignals.filter(_.lbl == IsConstraint)
 
     val assumeAccSignal = accWithResSignal.filter(x => x._1.lbl == IsFair) 
-    val assertAccSignal = accWithResSignal.filter(x => x._1.lbl == IsBad | x._1.lbl == IsJustice) 
+    val badAccSignal = accWithResSignal.filter(x => x._1.lbl == IsBad | x._1.lbl == IsJustice) 
 
     var gloAssumeStates: mutable.Seq[State] = mutable.Seq[State]()
     var allEqSignal = mutable.Seq[Signal]()
 
-    assertAccSignal.foreach{
+    badAccSignal.foreach{
       case t: Tuple3[Signal,BVExpr,Int] => {
         // translating assertion
-        val assertResult = genSafeSignals(just2BadStatesMap, t._1, t._2, t._3)
+        val isCover = t._1.name.slice(0,5) == "coAcc"
+        val assertResult = genSafeSignals(just2BadStatesMap, t._1, t._2, t._3, isCover)
 
         auxJust2BadStates = auxJust2BadStates ++ assertResult._2
         val seenState = assertResult._3
@@ -225,12 +229,13 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
     // println(s"enSafetyOpti: $enSafetyOpti")
 
     val chaAsserts : AnnotationSeq = state.annotations.filter {_.isInstanceOf[chaAssertAnno]}
+    val chaCovers : AnnotationSeq = state.annotations.filter {_.isInstanceOf[chaCoverAnno]}
     //println(s"chaAnnos: ($chaAnnos).toSeq")
     val chaAnnos : AnnotationSeq = state.annotations.filter {_.isInstanceOf[chaAnno]}
     
     // chaAssume without chaAssert is meaningless 
     val sortedSys =
-    if(!chaAsserts.isEmpty)
+    if(!chaAsserts.isEmpty || !chaCovers.isEmpty)
     {
       val targetDirs = state.annotations.collect { case TargetDirAnnotation(d) => d }.toSet
       require(targetDirs.nonEmpty, "Expected exactly one target directory, got none!")
@@ -266,6 +271,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
       val addAssumeToTransitionSystems: Unit = pslsWithMap.collect{
         case t: Tuple4[String, Map[String,Target], Target, chaStmt] if t._4 == chaAssumeStmt => 
         {
+          // println(s"chaAssumeStmt: ${t._1}")
           // add optimization: if assume(p) refers to a safety property and 
           // the negation of Gp corresponds to a deterministic automat, 
           // this assumption will be encoded to constraint
@@ -323,6 +329,24 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
         }
       }
 
+      val addCoverToTransitionSystems: Unit = pslsWithMap.collect{
+        case t: Tuple4[String, Map[String,Target], Target, chaStmt] if t._4 == chaCoverStmt => 
+        {
+          // println(s"chaCoverStmt: ${t._1}")
+          val cmd = Seq("ltl2tgba","-B","-D", "-f", t._1)
+          val retr:os.CommandResult = os.proc(cmd).call(cwd = os.pwd / os.RelPath(targetDirs.head), check = false)
+          
+          val dba = Buchi2TransitionSystem.getDBA(retr)
+          val ret = Buchi2TransitionSystem.psl2TransitionSystem(dba, t._2, extraInputNum, baStateNum, accSignalNum, circuit, t._3, t._4, allSafetyAssumeAsConst)
+          extraInputs ++= ret._1
+          baStates1 :+= ret._2
+          accSignals :+= ret._3
+          extraInputNum += dba.auxVarNum
+          baStateNum += 1
+          accSignalNum += 1
+        }
+      }
+
       val addAssertToTransitionSystems: Unit = pslsWithMap.collect{
         case t: Tuple4[String, Map[String,Target], Target, chaStmt] if t._4 == chaAssertStmt => 
         {
@@ -341,6 +365,7 @@ object EncodeCHA extends Transform with DependencyAPIMigration {
         }
       }
 
+      
       val sysWithoutSafetyAssume = sys.copy(sys.name,sys.inputs:::extraInputs.toList,sys.states:::baStates1.toList, sys.signals,sys.comments,sys.header)
       val sysJust2Bad = encodeProps(sysWithoutSafetyAssume, accSignals, resetSignals)
       val sysWithCHA = sysJust2Bad.copy(sysJust2Bad.name, sysJust2Bad.inputs, sysJust2Bad.states:::baStates2.toList, sysJust2Bad.signals, sysJust2Bad.comments, sysJust2Bad.header)

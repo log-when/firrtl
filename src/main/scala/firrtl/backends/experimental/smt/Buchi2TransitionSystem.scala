@@ -155,9 +155,11 @@ object Buchi2TransitionSystem {
     // println(s"BAAccept: ${h.accStates}")
     val baState = 
       if(chastmt == chaAssertStmt)
-        BVSymbol("assertSta" + BAStateNum + "_", h.stateBits)
-      else
-        BVSymbol("assumeSta" + BAStateNum + "_", h.stateBits)
+        BVSymbol("atSta" + BAStateNum + "_", h.stateBits)
+      else if(chastmt == chaCoverStmt)
+        BVSymbol("cvSta" + BAStateNum + "_", h.stateBits)
+      else 
+        BVSymbol("amSta" + BAStateNum + "_", h.stateBits)
       
     val extraInput:Seq[BVSymbol] = (extraInputNum until (extraInputNum + h.auxVarNum)).toSeq.map{case i: Int => BVSymbol("extInput"+i,1)}
     // extraInputNum = extraInputNum + h.auxVarNum
@@ -192,17 +194,25 @@ object Buchi2TransitionSystem {
     val accSignal = if(chastmt == chaAssertStmt)
     {
       if(r && optiEn)
-        Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad)
+        Signal("atAcc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad)
       else
-        Signal("BAacc" + accSignalNum, acceptExpr, IsJustice)
+        Signal("atAcc" + accSignalNum, acceptExpr, IsJustice)
+    }
+    else if(chastmt == chaCoverStmt)
+    {
+      // println(s"optiEn: $optiEn")
+      if(optiEn)
+        Signal("coAcc" + accSignalNum, BVAnd(List(BVNot(resetExpr), acceptExpr)) , IsBad)
+      else
+        Signal("coAcc" + accSignalNum, acceptExpr, IsJustice)
     }
     else
     {
       // println(s"optiEn: $optiEn")
       if(optiEn)
-        Signal("BAacc" + accSignalNum, BVAnd(List(BVNot(acceptExpr))) , IsConstraint)
+        Signal("amAcc" + accSignalNum, BVAnd(List(BVNot(acceptExpr))) , IsConstraint)
       else
-        Signal("BAacc" + accSignalNum, acceptExpr, IsFair)
+        Signal("amAcc" + accSignalNum, acceptExpr, IsFair)
     }
     
     Tuple3(extraInput, baState_, accSignal)
